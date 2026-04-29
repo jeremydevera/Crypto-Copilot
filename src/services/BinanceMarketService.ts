@@ -19,23 +19,62 @@ const WSS_BASE_URLS = [
 
 // ---- REST API ----
 
+// CoinGecko timeframe mapping
+const COINGECKO_TIMEFRAMES: Record<string, { days: number; granularity: string }> = {
+  '1m': { days: '0.042', granularity: '' },    // ~1 hour
+  '5m': { days: '1', granularity: '' },          // CoinGecko doesn't have 5m, use 1d
+  '15m': { days: '1', granularity: '' },
+  '1h': { days: '7', granularity: '' },
+  '4h': { days: '30', granularity: '' },
+  '1d': { days: '90', granularity: 'daily' },
+  '1w': { days: '365', granularity: 'weekly' },
+  '1M': { days: 'max', granularity: 'monthly' },
+};
+
 export async function fetchCandles(symbol: string, timeframe: string, limit: number = 100): Promise<Candle[]> {
+  // Try Binance first
   for (const baseURL of REST_BASE_URLS) {
     try {
       const url = `${baseURL}/api/v3/klines?symbol=${symbol}&interval=${timeframe}&limit=${limit}`;
       const res = await fetch(url);
       if (!res.ok) continue;
       const data = await res.json();
-      return data.map((k: any[]) => ({
-        openTime: k[0],
-        open: parseFloat(k[1]),
-        high: parseFloat(k[2]),
-        low: parseFloat(k[3]),
-        close: parseFloat(k[4]),
-        volume: parseFloat(k[5]),
-      }));
+      if (Array.isArray(data) && data.length > 0) {
+        return data.map((k: any[]) => ({
+          openTime: k[0],
+          open: parseFloat(k[1]),
+          high: parseFloat(k[2]),
+          low: parseFloat(k[3]),
+          close: parseFloat(k[4]),
+          volume: parseFloat(k[5]),
+        }));
+      }
     } catch { continue; }
   }
+
+  // Fallback to CoinGecko OHLC
+  try {
+    const cg = COINGECKO_TIMEFRAMES[timeframe];
+    const days = cg ? cg.days : '1';
+    const url = `https://api.coingecko.com/api/v3/coins/bitcoin/ohlc?vs_currency=usd&days=${days}`;
+    const res = await fetch(url);
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data) && data.length > 0) {
+        return data.map((k: number[]) => ({
+          openTime: k[0],
+          open: k[1],
+          high: k[2],
+          low: k[3],
+          close: k[4],
+          volume: 0, // CoinGecko OHLC doesn't include volume
+        }));
+      }
+    }
+  } catch {
+    // CoinGecko failed too
+  }
+
   return [];
 }
 

@@ -401,8 +401,21 @@ export default function ChartTab({ vm }: ChartTabProps) {
       </div>
 
       {/* Chart container */}
-      <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
+      <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden relative">
         <div ref={containerRef} className="w-full" style={{ height: '500px' }} />
+        {(!vm.selectedChartCandles || vm.selectedChartCandles.length === 0) && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-900/80 z-10">
+            <p className="text-gray-400 text-lg font-medium">No candle data available</p>
+            <p className="text-gray-600 text-sm mt-2">Binance API may be geo-blocked in your region</p>
+            <p className="text-gray-600 text-sm">Try connecting a live WebSocket feed above for real-time price</p>
+            <button
+              onClick={() => vm.refreshAll()}
+              className="mt-4 px-4 py-2 bg-green-600 hover:bg-green-500 text-white text-sm font-medium rounded-lg transition-colors"
+            >
+              Retry Fetch
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Indicator summary */}

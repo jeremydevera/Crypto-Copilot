@@ -77,7 +77,7 @@ export default function App() {
         {selectedTab === 4 && <SocketsTab />}
         {selectedTab === 5 && <TutorialTab />}
         {selectedTab === 6 && <SettingsTab vm={vm} />}
-        {selectedTab === 7 && <DevTerminalTab vm={vm} />}}
+        {selectedTab === 7 && <DevTerminalTab vm={vm} />}
       </main>
     </div>
   );
