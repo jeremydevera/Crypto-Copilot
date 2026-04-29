@@ -58,7 +58,7 @@ export default function DevTerminalTab({ vm }: DevTerminalTabProps) {
           <div>
             <p className="text-xs text-gray-500">Buy Score</p>
             <p className="text-base font-medium text-white">
-              {vm.activeSignal.buyScore.trend + vm.activeSignal.buyScore.entry + vm.activeSignal.buyScore.momentum + vm.activeSignal.buyScore.volume + vm.activeSignal.buyScore.riskReward + vm.activeSignal.buyScore.supportResistance + vm.activeSignal.buyScore.marketStructure + vm.activeSignal.buyScore.liquidity + vm.activeSignal.buyScore.volatility + vm.activeSignal.buyScore.session + vm.activeSignal.buyScore.entryConfirmation + vm.activeSignal.buyScore.riskManagement}
+              {vm.activeSignal.buyScore.higherTimeframeBias + vm.activeSignal.buyScore.marketStructure + vm.activeSignal.buyScore.liquidity + vm.activeSignal.buyScore.volatilitySession + vm.activeSignal.buyScore.riskReward + vm.activeSignal.buyScore.indicatorConfirmation}
             </p>
           </div>
           <div>

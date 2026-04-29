@@ -29,6 +29,23 @@ export default function SettingsTab({ vm }: SettingsTabProps) {
               className="w-full bg-gray-800 rounded-lg px-4 py-2.5 text-sm text-gray-200 border border-gray-700 focus:border-green-500 outline-none transition-colors"
             />
           </div>
+          <div className="flex items-center justify-between pt-2 border-t border-gray-800">
+            <div>
+              <p className="text-sm text-gray-200 font-medium">Auto-Trade</p>
+              <p className="text-xs text-gray-500 mt-0.5">Automatically execute paper trades on signal changes</p>
+            </div>
+            <button
+              onClick={() => vm.setAutoTradeEnabled(!vm.autoTradeEnabled)}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${vm.autoTradeEnabled ? 'bg-green-600' : 'bg-gray-700'}`}
+            >
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${vm.autoTradeEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+            </button>
+          </div>
+          {vm.autoTradeEnabled && (
+            <div className="bg-yellow-900/30 border border-yellow-700/50 rounded-lg p-3">
+              <p className="text-xs text-yellow-400">⚠️ Auto-trade will automatically BUY on Strong Buy / Consider Buy signals and SELL on Sell / Exit / Consider Sell signals. Minimum 1 minute between trades.</p>
+            </div>
+          )}
         </div>
 
         {/* Chart */}

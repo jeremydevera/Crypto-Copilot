@@ -3,6 +3,7 @@ import type { TradingSignal, DataFreshness, SignalDecision, RiskLevel, MarketReg
 import { totalScore, normalTotal, freshnessLabel, freshnessDotColor } from '../engine/types';
 import { usd, percent, number } from '../engine/formatters';
 import HelpModal from './HelpModal';
+import GaugeChart from './GaugeChart';
 
 interface HomeTabProps {
   vm: any;
@@ -48,7 +49,7 @@ export default function HomeTab({ vm }: HomeTabProps) {
   return (
     <div className="p-6 space-y-5 max-w-6xl mx-auto">
       <HelpModal topicId={activeHelpTopic} onClose={() => setActiveHelpTopic(null)} />
-      {/* Top Panel — Price + Decision */}
+      {/* Top Panel — Price + Gauge + Decision */}
       <div className="bg-gray-900 rounded-xl p-5 flex items-center justify-between">
         <div className="flex items-center gap-6">
           <div>
@@ -65,6 +66,13 @@ export default function HomeTab({ vm }: HomeTabProps) {
         </div>
 
         <div className="flex items-center gap-6">
+          <GaugeChart
+            value={totalScore(sig.buyScore)}
+            max={100}
+            size={160}
+            label="Overall Score"
+            sublabel={`Pro ${totalScore(sig.buyScore)} / Normal ${normalTotal(sig.normalBuyScore)}`}
+          />
           <div>
             <p className={`text-2xl font-bold ${decisionColor(sig.decision)}`}>{sig.decision}</p>
             <p className={`text-sm font-semibold ${riskColor(sig.risk)}`}>Risk: {sig.risk}</p>
@@ -149,16 +157,16 @@ export default function HomeTab({ vm }: HomeTabProps) {
             </div>
           </div>
 
-          {/* Pro Score */}
+          {/* Pro Score — New 6-Category Model */}
           <div className="bg-gray-900 rounded-xl p-5 space-y-3">
             <h2 className="text-sm font-bold text-gray-400 uppercase tracking-wider">Pro Score: {totalScore(sig.buyScore)} / 100</h2>
             <div className="space-y-2.5">
-              <ScoreRow label="Market Structure" score={sig.buyScore.marketStructure} max={20} infoAction={() => setActiveHelpTopic('marketStructure')} />
-              <ScoreRow label="Liquidity" score={sig.buyScore.liquidity} max={20} infoAction={() => setActiveHelpTopic('liquidity')} />
-              <ScoreRow label="Volatility" score={sig.buyScore.volatility} max={15} infoAction={() => setActiveHelpTopic('volatility')} />
-              <ScoreRow label="Session" score={sig.buyScore.session} max={10} infoAction={() => setActiveHelpTopic('session')} />
-              <ScoreRow label="Entry Confirmation" score={sig.buyScore.entryConfirmation} max={15} infoAction={() => setActiveHelpTopic('entryConfirmation')} />
-              <ScoreRow label="Risk Management" score={sig.buyScore.riskManagement} max={20} infoAction={() => setActiveHelpTopic('riskManagement')} />
+              <ScoreRow label="HTF Bias (1H/4H)" score={sig.buyScore.higherTimeframeBias} max={25} infoAction={() => setActiveHelpTopic('higherTimeframeBias')} />
+              <ScoreRow label="Market Structure" score={sig.buyScore.marketStructure} max={25} infoAction={() => setActiveHelpTopic('marketStructure')} />
+              <ScoreRow label="Liquidity" score={sig.buyScore.liquidity} max={15} infoAction={() => setActiveHelpTopic('liquidity')} />
+              <ScoreRow label="Volatility + Session" score={sig.buyScore.volatilitySession} max={15} infoAction={() => setActiveHelpTopic('volatilitySession')} />
+              <ScoreRow label="Risk/Reward" score={sig.buyScore.riskReward} max={15} infoAction={() => setActiveHelpTopic('riskReward')} />
+              <ScoreRow label="Indicator Confirm" score={sig.buyScore.indicatorConfirmation} max={5} infoAction={() => setActiveHelpTopic('indicatorConfirmation')} />
             </div>
           </div>
         </div>
@@ -185,6 +193,9 @@ export default function HomeTab({ vm }: HomeTabProps) {
           {/* Trailing Stop & Market Regime */}
           <div className="bg-gray-900 rounded-xl p-5 space-y-3">
             <h2 className="text-sm font-bold text-gray-400 uppercase tracking-wider">Market Context</h2>
+            <MetricRow label="Bias" value={sig.bias} color={sig.bias === 'Bullish' ? 'text-green-400' : sig.bias === 'Bearish' ? 'text-red-400' : 'text-yellow-400'} infoAction={() => setActiveHelpTopic('bias')} />
+            <MetricRow label="Confidence" value={`${sig.confidence}%`} color={sig.confidence >= 70 ? 'text-green-400' : sig.confidence >= 50 ? 'text-yellow-400' : 'text-red-400'} infoAction={() => setActiveHelpTopic('confidence')} />
+            <MetricRow label="Risk Profile" value={`1:${sig.rewardRisk.toFixed(1)} RR`} color={sig.rewardRisk >= 2 ? 'text-green-400' : 'text-red-400'} infoAction={() => setActiveHelpTopic('riskReward')} />
             {sig.trailingStop.activeTrailingStop !== null && (
               <MetricRow label="Trailing Stop" value={usd(sig.trailingStop.activeTrailingStop)} color="text-orange-400" infoAction={() => setActiveHelpTopic('trailingStop')} />
             )}

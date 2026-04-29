@@ -79,31 +79,22 @@ export function volumeRatio(snap: IndicatorSnapshot): number | null {
 
 // Score Breakdowns
 export interface ScoreBreakdown {
-  trend: number;
-  entry: number;
-  momentum: number;
-  volume: number;
-  riskReward: number;
-  supportResistance: number;
+  higherTimeframeBias: number;
   marketStructure: number;
   liquidity: number;
-  volatility: number;
-  session: number;
-  entryConfirmation: number;
-  riskManagement: number;
+  volatilitySession: number;
+  riskReward: number;
+  indicatorConfirmation: number;
 }
 
 export const emptyScoreBreakdown: ScoreBreakdown = {
-  trend: 0, entry: 0, momentum: 0, volume: 0,
-  riskReward: 0, supportResistance: 0,
-  marketStructure: 0, liquidity: 0, volatility: 0,
-  session: 0, entryConfirmation: 0, riskManagement: 0,
+  higherTimeframeBias: 0, marketStructure: 0, liquidity: 0,
+  volatilitySession: 0, riskReward: 0, indicatorConfirmation: 0,
 };
 
 export function totalScore(s: ScoreBreakdown): number {
-  return s.trend + s.entry + s.momentum + s.volume + s.riskReward +
-    s.supportResistance + s.marketStructure + s.liquidity + s.volatility +
-    s.session + s.entryConfirmation + s.riskManagement;
+  return s.higherTimeframeBias + s.marketStructure + s.liquidity +
+    s.volatilitySession + s.riskReward + s.indicatorConfirmation;
 }
 
 export interface NormalScoreBreakdown {
@@ -245,6 +236,7 @@ export type RiskLevel = 'Low' | 'Medium' | 'High';
 
 export type MarketState = 'Bullish Trend' | 'Bearish Trend' | 'Ranging' | 'Transitioning';
 export type SetupType = 'Sweep & Reverse' | 'Breakout' | 'Pullback Entry' | 'No Clear Setup';
+export type TimeframeBias = 'Bullish' | 'Bearish' | 'Neutral';
 
 export interface TradeQuote {
   investmentAmount: number;
@@ -282,9 +274,13 @@ export interface TradingSignal {
   warnings: string[];
   fiveMinute: IndicatorSnapshot;
   fifteenMinute: IndicatorSnapshot;
+  oneHour: IndicatorSnapshot;
+  fourHour: IndicatorSnapshot;
   marketState: MarketState;
   marketRegime: MarketRegime;
   setupType: SetupType;
+  bias: TimeframeBias;
+  confidence: number;
   backtest: BacktestEstimate;
   trailingStop: TrailingStopState;
   confluenceWarning: string | null;
@@ -307,9 +303,13 @@ export const placeholderSignal: TradingSignal = {
   warnings: [],
   fiveMinute: { ...emptyIndicatorSnapshot },
   fifteenMinute: { ...emptyIndicatorSnapshot },
+  oneHour: { ...emptyIndicatorSnapshot },
+  fourHour: { ...emptyIndicatorSnapshot },
   marketState: 'Ranging',
   marketRegime: 'Quiet / Low Activity',
   setupType: 'No Clear Setup',
+  bias: 'Neutral',
+  confidence: 0,
   backtest: { ...unavailableBacktest },
   trailingStop: { activeTrailingStop: null, target1Hit: false, movedToBreakeven: false },
   confluenceWarning: null,

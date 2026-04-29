@@ -18,6 +18,7 @@ import type {
   SetupType,
   SignalDecision,
   RiskLevel,
+  TimeframeBias,
 } from './types';
 
 import {
@@ -77,6 +78,8 @@ export function analyze(
   symbol: string,
   fiveMinuteCandles: Candle[],
   fifteenMinuteCandles: Candle[],
+  oneHourCandles: Candle[],
+  fourHourCandles: Candle[],
   feeAndSpreadPercent: number = defaultFeeAndSpreadPercent,
   investmentAmount: number = 100_000,
   demoBalance: number = 100_000,
@@ -126,6 +129,10 @@ export function analyze(
   );
 
   const fifteenMinuteStructure = getMarketStructure(fifteenMinuteCandles);
+  const oneHourStructure = getMarketStructure(oneHourCandles);
+  const fourHourStructure = getMarketStructure(fourHourCandles);
+  const oneHour = snapshot(oneHourCandles);
+  const fourHour = snapshot(fourHourCandles);
   const latestFiveMinuteSwingLow = preSwingLow;
   const latestFiveMinuteSwingHigh = preSwingHigh;
   const nearestResistance = preNearestResistance;
@@ -147,11 +154,61 @@ export function analyze(
   const stopLossHit = hasActivePosition && price <= quote.stopLoss;
   const targetHit = hasActivePosition && (price >= quote.target1 || price >= quote.target2);
 
-  // ── Market Structure scoring ──
+  // ════════════════════════════════════════════════════════════
+  // NEW SCORING MODEL (Reddit-informed)
+  // 1. Higher Timeframe Bias — 25 pts
+  // 2. Market Structure — 25 pts
+  // 3. Liquidity — 15 pts
+  // 4. Volatility + Session — 15 pts
+  // 5. Risk/Reward — 15 pts
+  // 6. Indicator Confirmation — 5 pts
+  // ════════════════════════════════════════════════════════════
+
+  // ── 1. Higher Timeframe Bias (25 pts) ──
+
+  // 4H macro direction
+  const fourHourBullish = isBullishStructure(fourHourStructure);
+  const fourHourBearish = isBearishStructure(fourHourStructure);
+
+  // 1H trading bias
+  const oneHourBullish = isBullishStructure(oneHourStructure);
+  const oneHourBearish = isBearishStructure(oneHourStructure);
+
+  if (fourHourBullish) {
+    buyScore.higherTimeframeBias += 10;
+    reasons.push('4H structure is bullish (higher highs & lows)');
+  }
+  if (oneHourBullish) {
+    buyScore.higherTimeframeBias += 10;
+    reasons.push('1H structure is bullish (higher highs & lows)');
+  }
+  if (oneHour.ema9 !== null && oneHour.ema21 !== null && oneHour.ema9 > oneHour.ema21) {
+    buyScore.higherTimeframeBias += 5;
+    reasons.push('1H EMA9 above EMA21 confirms bias');
+  }
+
+  // Hard filter: if 1H is bearish, don't buy against the flow
+  if (oneHourBearish) {
+    hardFilterFailed = true;
+    warnings.push('Hard filter: 1H bias is bearish — do not buy against higher TF flow');
+  }
+
+  // ── 2. Market Structure (25 pts) ──
 
   if (isBullishStructure(fifteenMinuteStructure)) {
-    buyScore.marketStructure += 10;
-    reasons.push('15m structure is bullish with higher high and higher low');
+    buyScore.marketStructure += 8;
+    reasons.push('15m higher high + higher low confirmed');
+  }
+
+  // Break of structure upward
+  const fifteenMinuteHighs = swingHighs(fifteenMinuteCandles);
+  if (fifteenMinuteHighs.length >= 2) {
+    const latest = fifteenMinuteHighs[fifteenMinuteHighs.length - 1];
+    const previous = fifteenMinuteHighs[fifteenMinuteHighs.length - 2];
+    if (latest.price > previous.price) {
+      buyScore.marketStructure += 5;
+      reasons.push('15m break of structure upward');
+    }
   }
 
   if (price > (fifteenMinute.ema50 ?? Infinity)) {
@@ -160,132 +217,136 @@ export function analyze(
   }
 
   if (fifteenMinute.ema9 !== null && fifteenMinute.ema21 !== null && fifteenMinute.ema9 > fifteenMinute.ema21) {
-    buyScore.marketStructure += 5;
+    buyScore.marketStructure += 4;
     reasons.push('15m EMA9 is above EMA21');
   }
 
-  // ── Liquidity scoring ──
+  // No recent bearish break
+  const fifteenMinuteLows = swingLows(fifteenMinuteCandles);
+  if (fifteenMinuteLows.length >= 2) {
+    const latest = fifteenMinuteLows[fifteenMinuteLows.length - 1];
+    const previous = fifteenMinuteLows[fifteenMinuteLows.length - 2];
+    if (latest.price > previous.price) {
+      buyScore.marketStructure += 3;
+      reasons.push('15m no bearish break — higher lows intact');
+    }
+  }
+
+  // ── 3. Liquidity (15 pts) ──
 
   if (latestFiveMinuteSwingLow !== null && latest.low < latestFiveMinuteSwingLow.price && latest.close > latestFiveMinuteSwingLow.price) {
-    buyScore.liquidity += 10;
-    reasons.push('price swept a recent low and reclaimed it');
+    buyScore.liquidity += 7;
+    reasons.push('price swept a recent low and reclaimed it (liquidity sweep)');
   }
 
   const riskPerUnit = Math.max(price - quote.stopLoss, 0);
   if (nearestResistance !== null) {
     if (nearestResistance.price - price >= riskPerUnit * 2) {
       buyScore.liquidity += 5;
-      reasons.push('nearest resistance leaves at least 2R of room');
+      reasons.push('target liquidity above is clear (2R room)');
     }
-
     if (price < nearestResistance.price * 0.995) {
-      buyScore.liquidity += 5;
-      reasons.push('price is not directly under resistance');
+      buyScore.liquidity += 3;
+      reasons.push('not directly below resistance');
     }
   } else {
-    buyScore.liquidity += 10;
-    reasons.push('no nearby swing resistance is blocking the setup');
+    buyScore.liquidity += 8;
+    reasons.push('no nearby swing resistance blocking the setup');
   }
 
   const depthImbalance = microDepthImbalance(marketMicrostructure);
-  if (depthImbalance !== null) {
-    if (depthImbalance > 0.05) {
-      buyScore.liquidity = Math.min(20, buyScore.liquidity + 5);
-      reasons.push('order book depth has stronger bid support');
-    } else if (depthImbalance < -0.2) {
-      warnings.push('Order book depth shows ask-side pressure');
-    }
+  if (depthImbalance !== null && depthImbalance < -0.2) {
+    warnings.push('Order book depth shows ask-side pressure');
   }
 
-  // ── Volatility scoring ──
+  // ── 4. Volatility + Session (15 pts) ──
 
   if (atrRatioVal !== null) {
     if (atrRatioVal >= 0.8 && atrRatioVal <= 1.8) {
-      buyScore.volatility += 15;
+      buyScore.volatilitySession += 7;
       reasons.push('ATR volatility is in the tradable range');
     } else if ((atrRatioVal >= 0.5 && atrRatioVal < 0.8) || (atrRatioVal >= 1.8 && atrRatioVal <= 2.5)) {
-      buyScore.volatility += 8;
+      buyScore.volatilitySession += 4;
       reasons.push('ATR volatility is acceptable but imperfect');
     } else if (atrRatioVal < 0.5) {
       hardFilterFailed = true;
-      warnings.push('Hard filter: volatility is too low');
+      warnings.push('Hard filter: volatility is too low — dead market');
     } else if (atrRatioVal >= 3.0) {
       hardFilterFailed = true;
       warnings.push('Hard filter: volatility is too extreme');
-    } else {
-      warnings.push('Volatility is elevated');
     }
-  } else {
-    warnings.push('ATR volatility needs more candles');
   }
-
-  // ── Session scoring ──
 
   const fiveMinuteVolumeRatio = volumeRatio(fiveMinute);
   if (fiveMinuteVolumeRatio !== null && fiveMinuteVolumeRatio >= 1.2) {
-    buyScore.session += 7;
-    reasons.push('market participation is active');
+    buyScore.volatilitySession += 5;
+    reasons.push('market participation is active (volume above average)');
   }
 
   const spreadPct = microSpreadPercent(marketMicrostructure);
   if (spreadPct !== null) {
     if (spreadPct <= 0.05) {
-      buyScore.session += 3;
+      buyScore.volatilitySession += 3;
       reasons.push('live bid/ask spread is acceptable');
     } else {
       warnings.push('Live bid/ask spread is wide');
     }
   } else if (feeAndSpreadPercent <= 1.0) {
-    buyScore.session += 3;
+    buyScore.volatilitySession += 3;
     reasons.push('estimated spread and fees are acceptable');
-  } else {
-    warnings.push('Estimated spread and fees are high');
   }
 
-  // ── Entry Confirmation scoring ──
-
-  if (fiveMinute.rsi14 !== null && fiveMinute.rsi14 >= 45 && fiveMinute.rsi14 <= 65 && isRSIRising(fiveMinute)) {
-    buyScore.entryConfirmation += 5;
-    reasons.push('RSI is in range and rising');
-  }
-
-  if (isMACDBullish(fiveMinute)) {
-    buyScore.entryConfirmation += 5;
-    reasons.push('MACD is bullish on 5m');
-  }
-
-  if (fiveMinute.ema21 !== null && latest.close > fiveMinute.ema21) {
-    buyScore.entryConfirmation += 5;
-    reasons.push('5m candle closed above EMA21');
-  } else {
-    const previous = fiveMinuteCandles.slice(0, -1)[fiveMinuteCandles.length - 2];
-    if (previous !== undefined && price > previous.high) {
-      buyScore.entryConfirmation += 5;
-      reasons.push('price broke the previous 5m candle high');
-    }
-  }
-
-  // ── Risk Management scoring ──
+  // ── 5. Risk/Reward (15 pts) ──
 
   if (quote.rewardRisk >= 2) {
-    buyScore.riskManagement += 10;
+    buyScore.riskReward += 10;
     reasons.push('reward/risk is at least 2:1');
   }
 
   if (latestFiveMinuteSwingLow !== null && quote.stopLoss < latestFiveMinuteSwingLow.price) {
-    buyScore.riskManagement += 5;
+    buyScore.riskReward += 3;
     reasons.push('stop loss is below recent structure');
   } else if (quote.stopLoss < latest.low) {
-    buyScore.riskManagement += 5;
+    buyScore.riskReward += 3;
     reasons.push('stop loss is below the current candle low');
   }
 
   if (accountRiskPercent <= 2) {
-    buyScore.riskManagement += 5;
+    buyScore.riskReward += 2;
     reasons.push('position size risks no more than 2% of demo balance');
   } else {
     hardFilterFailed = true;
     warnings.push('Hard filter: position risk is above 2% of demo balance');
+  }
+
+  // Hard filter: RR < 2:1 = No Trade
+  if (quote.rewardRisk < 2) {
+    hardFilterFailed = true;
+    warnings.push('Hard filter: reward/risk is below 2:1');
+  }
+
+  // ── 6. Indicator Confirmation (5 pts) ──
+  // Indicators are confirmation only — they do NOT lead the decision
+
+  if (fiveMinute.rsi14 !== null && fiveMinute.rsi14 >= 45 && fiveMinute.rsi14 <= 65 && isRSIRising(fiveMinute)) {
+    buyScore.indicatorConfirmation += 2;
+    reasons.push('RSI confirms (45-65 and rising)');
+  }
+
+  if (isMACDBullish(fiveMinute)) {
+    buyScore.indicatorConfirmation += 2;
+    reasons.push('MACD confirms bullish');
+  }
+
+  if (fiveMinute.ema21 !== null && latest.close > fiveMinute.ema21) {
+    buyScore.indicatorConfirmation += 1;
+    reasons.push('EMA alignment confirms');
+  }
+
+  // Hard filter: RSI > 70 = don't chase
+  if (fiveMinute.rsi14 !== null && fiveMinute.rsi14 > 70) {
+    hardFilterFailed = true;
+    warnings.push('Hard filter: RSI is too high to chase');
   }
 
   // ── Sell Score Breakdown (5 categories) ──
@@ -302,6 +363,10 @@ export function analyze(
   }
   if (price < (fifteenMinute.ema50 ?? 0)) {
     sellBreakdown.structureWeakness += 5;
+  }
+  // 1H bias turns bearish = strong exit signal
+  if (oneHourBearish) {
+    sellBreakdown.structureWeakness += 10;
   }
 
   // B. Liquidity Rejection (max 20)
@@ -359,14 +424,22 @@ export function analyze(
     sellScore = Math.min(sellScore, 100);
   }
 
-  const filterResult = applyHardFilters(
-    buyScore.marketStructure,
-    buyScore.entryConfirmation,
-    quote,
-    fiveMinute
+  // Hard filter: choppy market = no trade
+  const regime = detectMarketRegime(
+    atrRatioVal,
+    fifteenMinuteStructure,
+    fiveMinuteCandles,
+    price,
+    fifteenMinute
   );
-  hardFilterFailed = hardFilterFailed || filterResult.hardFilterFailed;
-  warnings = warnings.concat(filterResult.warnings);
+  if (regime === 'Volatile / Choppy') {
+    hardFilterFailed = true;
+    warnings.push('Hard filter: market is choppy — avoid trading');
+  } else if (regime === 'Ranging') {
+    warnings.push('Market is ranging — trend signals may underperform');
+  } else if (regime === 'Quiet / Low Activity') {
+    warnings.push('Market is quiet — low participation may cause false signals');
+  }
 
   const backtest = estimateBacktestProbability(
     fiveMinuteCandles,
@@ -386,25 +459,13 @@ export function analyze(
   const setupTypeVal = determineSetupType(
     buyScore.liquidity >= 10,
     latestFiveMinuteSwingHigh !== null ? price > latestFiveMinuteSwingHigh.price : false,
-    buyScore.entryConfirmation
+    buyScore.indicatorConfirmation
   );
 
-  // ── Market Regime Detection ──
+  // ── Bias & Confidence ──
 
-  const regime = detectMarketRegime(
-    atrRatioVal,
-    fifteenMinuteStructure,
-    fiveMinuteCandles,
-    price,
-    fifteenMinute
-  );
-  if (regime === 'Ranging') {
-    warnings.push('Market is ranging — trend signals may underperform');
-  } else if (regime === 'Volatile / Choppy') {
-    warnings.push('Market is volatile/choppy — increased risk of whipsaw');
-  } else if (regime === 'Quiet / Low Activity') {
-    warnings.push('Market is quiet — low participation may cause false signals');
-  }
+  const bias: TimeframeBias = determineBias(oneHourStructure, fourHourStructure, oneHour, fourHour);
+  const confidence = calculateConfidence(totalScore(buyScore), backtest);
 
   // ── Trailing Stop Logic ──
 
@@ -448,6 +509,10 @@ export function analyze(
     warnings,
     fiveMinute,
     fifteenMinute,
+    oneHour,
+    fourHour,
+    bias,
+    confidence,
     marketState: marketStateVal,
     marketRegime: regime,
     setupType: setupTypeVal,
@@ -801,6 +866,66 @@ function determineSetupType(hasSweep: boolean, isBreakout: boolean, entryScore: 
   if (isBreakout && entryScore > 0) return 'Breakout';
   if (entryScore > 0) return 'Pullback Entry';
   return 'No Clear Setup';
+}
+
+// ── Bias from Higher Timeframes ──────────────────────────────
+
+function determineBias(
+  oneHourStructure: MarketStructure,
+  fourHourStructure: MarketStructure,
+  oneHour: IndicatorSnapshot,
+  _fourHour: IndicatorSnapshot
+): TimeframeBias {
+  let bullish = 0;
+  let bearish = 0;
+
+  // 4H structure
+  if (isBullishStructure(fourHourStructure)) bullish += 2;
+  if (isBearishStructure(fourHourStructure)) bearish += 2;
+
+  // 1H structure
+  if (isBullishStructure(oneHourStructure)) bullish += 2;
+  if (isBearishStructure(oneHourStructure)) bearish += 2;
+
+  // 1H EMA alignment
+  if (oneHour.ema9 !== null && oneHour.ema21 !== null) {
+    if (oneHour.ema9 > oneHour.ema21) bullish += 1;
+    if (oneHour.ema9 < oneHour.ema21) bearish += 1;
+  }
+
+  // 1H price vs EMA50
+  if (oneHour.ema50 !== null) {
+    // We don't have the 1H price directly, but we can infer from the snapshot
+    // If EMA9 > EMA50, likely price is above
+    if (oneHour.ema9 !== null && oneHour.ema9 > oneHour.ema50) bullish += 1;
+    if (oneHour.ema9 !== null && oneHour.ema9 < oneHour.ema50) bearish += 1;
+  }
+
+  if (bullish > bearish + 1) return 'Bullish';
+  if (bearish > bullish + 1) return 'Bearish';
+  return 'Neutral';
+}
+
+// ── Confidence Calculation ────────────────────────────────────
+
+function calculateConfidence(
+  totalBuyScore: number,
+  backtest: { winRate: number | null; expectedValueR: number | null; total: number }
+): number {
+  // Base confidence from total score (0-100 scale)
+  let conf = totalBuyScore;
+
+  // Boost if backtest is positive
+  if (backtest.expectedValueR !== null && backtest.expectedValueR > 0) {
+    conf += 5;
+  }
+
+  // Reduce if backtest win rate is low
+  if (backtest.winRate !== null && backtest.winRate < 0.4) {
+    conf -= 10;
+  }
+
+  return Math.max(0, Math.min(100, Math.round(conf)));
 }
 
 // ── Candle helpers ────────────────────────────────────────────

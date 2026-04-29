@@ -13,11 +13,15 @@ import { PaperTradingStore } from './PaperTradingStore';
 const SYMBOL = 'BTCUSDT';
 const MAX_5M_CANDLES = 300;
 const MAX_15M_CANDLES = 200;
+const MAX_1H_CANDLES = 200;
+const MAX_4H_CANDLES = 200;
 
 export function useMarketViewModel() {
   // Core state
   const [fiveMinuteCandles, setFiveMinuteCandles] = useState<Candle[]>([]);
   const [fifteenMinuteCandles, setFifteenMinuteCandles] = useState<Candle[]>([]);
+  const [oneHourCandles, setOneHourCandles] = useState<Candle[]>([]);
+  const [fourHourCandles, setFourHourCandles] = useState<Candle[]>([]);
   const [selectedChartCandles, setSelectedChartCandles] = useState<Candle[]>([]);
   const [signal, setSignal] = useState<TradingSignal>(placeholderSignal);
   const [activeSignal, setActiveSignal] = useState<TradingSignal>(placeholderSignal);
@@ -35,6 +39,7 @@ export function useMarketViewModel() {
   const [selectedChartTimeframe, setSelectedChartTimeframe] = useState<Timeframe>('1d');
   const [investmentAmount, setInvestmentAmount] = useState(10000);
   const [feeAndSpreadPercent] = useState(0.5);
+  const [autoTradeEnabled, setAutoTradeEnabled] = useState(false);
 
   // Refs for mutable state in callbacks
   const paperTradingRef = useRef(new PaperTradingStore());
@@ -48,6 +53,7 @@ export function useMarketViewModel() {
   const lastSignalCalcTime = useRef(0);
   const lastLogTime = useRef(0);
   const lastMicroRefreshTime = useRef(0);
+  const lastAutoTradeTime = useRef<number>(0);
   const lastNotifiedDecision = useRef<string | null>(null);
 
   // Freshness timer
@@ -77,10 +83,10 @@ export function useMarketViewModel() {
   }, []);
 
   const recalculateSignal = useCallback((
-    fmc: Candle[], fmc15: Candle[], invAmt: number, feePct: number, pt: PaperTradingStore, ms: MarketMicrostructure
+    fmc: Candle[], fmc15: Candle[], fmc1h: Candle[], fmc4h: Candle[], invAmt: number, feePct: number, pt: PaperTradingStore, ms: MarketMicrostructure
   ) => {
     const newSignal = analyze(
-      SYMBOL, fmc, fmc15, feePct, invAmt, pt.demoBalance,
+      SYMBOL, fmc, fmc15, fmc1h, fmc4h, feePct, invAmt, pt.demoBalance,
       pt.openPosition?.entryPrice ?? null,
       pt.openPosition?.investedAmount ?? null,
       1, ms
@@ -117,10 +123,11 @@ export function useMarketViewModel() {
         modified.stopLoss = modified.trailingStop.activeTrailingStop;
       }
     } else {
+      const total = modified.buyScore.higherTimeframeBias + modified.buyScore.marketStructure + modified.buyScore.liquidity + modified.buyScore.volatilitySession + modified.buyScore.riskReward + modified.buyScore.indicatorConfirmation;
       if (newSignal.decision === 'No Trade') modified.decision = 'No Trade';
-      else if (modified.buyScore.trend + modified.buyScore.entry + modified.buyScore.momentum + modified.buyScore.volume + modified.buyScore.riskReward + modified.buyScore.supportResistance + modified.buyScore.marketStructure + modified.buyScore.liquidity + modified.buyScore.volatility + modified.buyScore.session + modified.buyScore.entryConfirmation + modified.buyScore.riskManagement >= 85) modified.decision = 'Strong Buy';
-      else if (modified.buyScore.trend + modified.buyScore.entry + modified.buyScore.momentum + modified.buyScore.volume + modified.buyScore.riskReward + modified.buyScore.supportResistance + modified.buyScore.marketStructure + modified.buyScore.liquidity + modified.buyScore.volatility + modified.buyScore.session + modified.buyScore.entryConfirmation + modified.buyScore.riskManagement >= 75) modified.decision = 'Consider Buy';
-      else if (modified.buyScore.trend + modified.buyScore.entry + modified.buyScore.momentum + modified.buyScore.volume + modified.buyScore.riskReward + modified.buyScore.supportResistance + modified.buyScore.marketStructure + modified.buyScore.liquidity + modified.buyScore.volatility + modified.buyScore.session + modified.buyScore.entryConfirmation + modified.buyScore.riskManagement >= 60) modified.decision = 'Wait';
+      else if (total >= 85) modified.decision = 'Strong Buy';
+      else if (total >= 75) modified.decision = 'Consider Buy';
+      else if (total >= 60) modified.decision = 'Wait';
       else modified.decision = 'No Trade';
     }
     setActiveSignal(modified);
@@ -138,7 +145,33 @@ export function useMarketViewModel() {
       qNextRes ?? null,
       qFarRes ?? null
     ));
-  }, []);
+
+    // Auto-trade logic
+    if (autoTradeEnabled) {
+      const now = Date.now();
+      const minInterval = 60000; // 1 minute minimum between auto-trades
+      if (now - lastAutoTradeTime.current > minInterval) {
+        const decision = modified.decision;
+        const hasPosition = pt.openPosition !== null;
+
+        if (!hasPosition && (decision === 'Strong Buy' || decision === 'Consider Buy')) {
+          const err = pt.buy(SYMBOL, modified.price, invAmt);
+          if (!err) {
+            addLog(`[AUTO-TRADE] BUY executed at $${modified.price.toFixed(2)}`);
+            lastAutoTradeTime.current = now;
+            setPtVersion(v => v + 1);
+          }
+        } else if (hasPosition && (decision === 'Sell / Exit' || decision === 'Consider Sell')) {
+          const result = pt.sell(modified.price);
+          if ('trade' in result) {
+            addLog(`[AUTO-TRADE] SELL executed at $${modified.price.toFixed(2)}`);
+            lastAutoTradeTime.current = now;
+            setPtVersion(v => v + 1);
+          }
+        }
+      }
+    }
+  }, [autoTradeEnabled]);
 
   const handleLiveTrade = useCallback((trade: TradeTick) => {
     const now = Date.now();
@@ -199,8 +232,8 @@ export function useMarketViewModel() {
   // Recalculate signal when candles change
   useEffect(() => {
     if (fiveMinuteCandles.length === 0 || fifteenMinuteCandles.length === 0) return;
-    recalculateSignal(fiveMinuteCandles, fifteenMinuteCandles, investmentAmount, feeAndSpreadPercent, paperTrading, microstructure);
-  }, [fiveMinuteCandles, fifteenMinuteCandles, investmentAmount, feeAndSpreadPercent, microstructure, recalculateSignal]);
+    recalculateSignal(fiveMinuteCandles, fifteenMinuteCandles, oneHourCandles, fourHourCandles, investmentAmount, feeAndSpreadPercent, paperTrading, microstructure);
+  }, [fiveMinuteCandles, fifteenMinuteCandles, oneHourCandles, fourHourCandles, investmentAmount, feeAndSpreadPercent, microstructure, recalculateSignal]);
 
   const refreshMicrostructure = async (_logRaw: boolean = false) => {
     try {
@@ -218,14 +251,18 @@ export function useMarketViewModel() {
     addRestLog('Initiating REST API fetch...');
 
     try {
-      const [new5m, new15m, newChart] = await Promise.all([
+      const [new5m, new15m, new1h, new4h, newChart] = await Promise.all([
         fetchCandles(SYMBOL, '5m', 300),
         fetchCandles(SYMBOL, '15m', 200),
+        fetchCandles(SYMBOL, '1h', 200),
+        fetchCandles(SYMBOL, '4h', 200),
         fetchCandles(SYMBOL, selectedChartTimeframe, 500),
       ]);
 
       setFiveMinuteCandles(new5m);
       setFifteenMinuteCandles(new15m);
+      setOneHourCandles(new1h);
+      setFourHourCandles(new4h);
       if (newChart.length > 0) setSelectedChartCandles(newChart);
 
       await refreshMicrostructure(true);
@@ -338,10 +375,12 @@ export function useMarketViewModel() {
     statusMessage, isLoading, lastUpdated, dataFreshness,
     microstructure, devLogs, restLogs,
     selectedChartTimeframe, investmentAmount, feeAndSpreadPercent,
+    autoTradeEnabled,
     paperTrading, ptVersion,
 
     // Actions
     setSelectedChartTimeframe, setInvestmentAmount,
+    setAutoTradeEnabled,
     buyPaperTrade, sellPaperTrade, sellPartialPaperTrade,
     start, refreshAll,
   };
