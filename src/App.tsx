@@ -6,15 +6,17 @@ import HistoryTab from './components/HistoryTab';
 import TutorialTab from './components/TutorialTab';
 import SettingsTab from './components/SettingsTab';
 import DevTerminalTab from './components/DevTerminalTab';
+import SocketsTab from './components/SocketsTab';
 import NotificationPanel from './components/NotificationPanel';
 
 const TABS = [
   { id: 0, label: 'Home' },
   { id: 1, label: 'Calculator' },
   { id: 2, label: 'History' },
-  { id: 3, label: 'Tutorial' },
-  { id: 4, label: 'Settings' },
-  { id: 5, label: 'Dev' },
+  { id: 3, label: 'Sockets' },
+  { id: 4, label: 'Tutorial' },
+  { id: 5, label: 'Settings' },
+  { id: 6, label: 'Dev' },
 ];
 
 export default function App() {
@@ -69,9 +71,10 @@ export default function App() {
         {selectedTab === 0 && <HomeTab vm={vm} />}
         {selectedTab === 1 && <CalculatorTab vm={vm} />}
         {selectedTab === 2 && <HistoryTab vm={vm} />}
-        {selectedTab === 3 && <TutorialTab />}
-        {selectedTab === 4 && <SettingsTab vm={vm} />}
-        {selectedTab === 5 && <DevTerminalTab vm={vm} />}
+        {selectedTab === 3 && <SocketsTab />}
+        {selectedTab === 4 && <TutorialTab />}
+        {selectedTab === 5 && <SettingsTab vm={vm} />}
+        {selectedTab === 6 && <DevTerminalTab vm={vm} />}
       </main>
     </div>
   );
