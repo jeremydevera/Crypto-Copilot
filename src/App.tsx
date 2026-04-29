@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useMarketViewModel } from './store/useMarketViewModel';
 import HomeTab from './components/HomeTab';
+import ChartTab from './components/ChartTab';
 import CalculatorTab from './components/CalculatorTab';
 import HistoryTab from './components/HistoryTab';
 import TutorialTab from './components/TutorialTab';
@@ -11,12 +12,13 @@ import NotificationPanel from './components/NotificationPanel';
 
 const TABS = [
   { id: 0, label: 'Home' },
-  { id: 1, label: 'Calculator' },
-  { id: 2, label: 'History' },
-  { id: 3, label: 'Sockets' },
-  { id: 4, label: 'Tutorial' },
-  { id: 5, label: 'Settings' },
-  { id: 6, label: 'Dev' },
+  { id: 1, label: 'Chart' },
+  { id: 2, label: 'Calculator' },
+  { id: 3, label: 'History' },
+  { id: 4, label: 'Sockets' },
+  { id: 5, label: 'Tutorial' },
+  { id: 6, label: 'Settings' },
+  { id: 7, label: 'Dev' },
 ];
 
 export default function App() {
@@ -69,12 +71,13 @@ export default function App() {
       {/* Main Content */}
       <main className="flex-1 overflow-y-auto">
         {selectedTab === 0 && <HomeTab vm={vm} />}
-        {selectedTab === 1 && <CalculatorTab vm={vm} />}
-        {selectedTab === 2 && <HistoryTab vm={vm} />}
-        {selectedTab === 3 && <SocketsTab />}
-        {selectedTab === 4 && <TutorialTab />}
-        {selectedTab === 5 && <SettingsTab vm={vm} />}
-        {selectedTab === 6 && <DevTerminalTab vm={vm} />}
+        {selectedTab === 1 && <ChartTab vm={vm} />}
+        {selectedTab === 2 && <CalculatorTab vm={vm} />}
+        {selectedTab === 3 && <HistoryTab vm={vm} />}
+        {selectedTab === 4 && <SocketsTab />}
+        {selectedTab === 5 && <TutorialTab />}
+        {selectedTab === 6 && <SettingsTab vm={vm} />}
+        {selectedTab === 7 && <DevTerminalTab vm={vm} />}}
       </main>
     </div>
   );
