@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import type { TradingSignal, DataFreshness, SignalDecision, RiskLevel, MarketRegime } from '../engine/types';
 import { totalScore, normalTotal, freshnessLabel, freshnessDotColor } from '../engine/types';
-import { usd, percent, number } from '../engine/formatters';
+import { usd, fiat, percent, number } from '../engine/formatters';
 import HelpModal from './HelpModal';
 import GaugeChart from './GaugeChart';
+
 
 interface HomeTabProps {
   vm: any;
@@ -46,87 +47,73 @@ export default function HomeTab({ vm }: HomeTabProps) {
   const hasPosition = pt.openPosition !== null;
   const [activeHelpTopic, setActiveHelpTopic] = useState<string | null>(null);
 
+
   return (
-    <div className="p-6 space-y-5 max-w-6xl mx-auto">
+    <div className="p-6 space-y-3 max-w-6xl mx-auto">
       <HelpModal topicId={activeHelpTopic} onClose={() => setActiveHelpTopic(null)} />
-      {/* Top Panel — Price + Gauge + Decision */}
-      <div className="bg-gray-900 rounded-xl p-5 flex items-center justify-between">
-        <div className="flex items-center gap-6">
-          <div>
-            <h1 className="text-2xl font-bold text-white">BTC/USDT</h1>
-            <p className="text-sm text-gray-500">{vm.statusMessage}</p>
-          </div>
-          <div className="border-l border-gray-700 pl-6">
-            <p className="text-3xl font-bold text-white">{usd(sig.price)}</p>
-            <div className="flex items-center gap-1.5 mt-0.5">
-              <div className={`w-2 h-2 rounded-full ${freshnessDot(vm.dataFreshness)}`} />
-              <span className="text-xs text-gray-500">{freshnessLabel(vm.dataFreshness)}</span>
+      {/* Single Grid — All Content */}
+      <div className="grid grid-cols-3 gap-3 items-start">
+        {/* Left Column — Price + Risk + Indicators */}
+        <div className="space-y-3">
+          {/* Price Tile */}
+          <div className="bg-gray-900 rounded-xl p-6 flex flex-col relative h-[160px]">
+            <button
+              onClick={() => vm.start()}
+              className="absolute top-3 right-3 group text-gray-500 hover:text-white transition-colors"
+              title="Refresh Connection"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            </button>
+            <div className="flex-1 flex flex-col justify-center mt-2 pl-1">
+              <div className="flex items-center gap-2 mb-1">
+                <CryptoLogo pair={vm.cryptoPair} />
+                <select
+                  value={vm.cryptoPair}
+                  onChange={e => vm.setCryptoPair(e.target.value)}
+                  className="bg-transparent text-base font-semibold text-white outline-none appearance-none cursor-pointer pr-4 bg-[url('data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%228%22%20height%3D%225%22%20viewBox%3D%220%200%208%205%22%3E%3Cpath%20d%3D%22M1%201l3%203%203-3%22%20stroke%3D%22%239ca3af%22%20stroke-width%3D%221.5%22%20fill%3D%22none%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%2F%3E%3C%2Fsvg%3E')] bg-no-repeat bg-[right_center]"
+                >
+                <option value="BTC/USDT">BTC/USDT</option>
+                <option value="ETH/USDT">ETH/USDT</option>
+                <option value="SOL/USDT">SOL/USDT</option>
+                <option value="BNB/USDT">BNB/USDT</option>
+                <option value="XRP/USDT">XRP/USDT</option>
+                <option value="DOGE/USDT">DOGE/USDT</option>
+              </select>
+              </div>
+              <p className={`font-mono text-3xl font-semibold ${sig.price >= sig.entryPrice ? 'text-[#0ecb81]' : 'text-[#f6465d]'}`}>{usd(sig.price)}</p>
+              <div className="flex items-center gap-1.5 mt-0.5">
+                <div className={`w-2 h-2 rounded-full ${freshnessDot(vm.dataFreshness)}`} />
+                <span className="text-xs text-gray-500">{freshnessLabel(vm.dataFreshness)}</span>
+              </div>
             </div>
           </div>
-        </div>
 
-        <div className="flex items-center gap-6">
-          <GaugeChart
-            value={totalScore(sig.buyScore)}
-            max={100}
-            size={160}
-            label="Overall Score"
-            sublabel={`Pro ${totalScore(sig.buyScore)} / Normal ${normalTotal(sig.normalBuyScore)}`}
-          />
-          <div>
-            <p className={`text-2xl font-bold ${decisionColor(sig.decision)}`}>{sig.decision}</p>
-            <p className={`text-sm font-semibold ${riskColor(sig.risk)}`}>Risk: {sig.risk}</p>
-          </div>
-          <div className="flex gap-2">
-            {!hasPosition ? (
-              <button
-                onClick={() => { const err = vm.buyPaperTrade(); if (err) alert(err); }}
-                className="bg-green-600 hover:bg-green-500 text-white text-sm font-bold px-6 py-2.5 rounded-lg transition-colors"
-              >
-                BUY
-              </button>
-            ) : (
-              <>
-                <button
-                  onClick={() => vm.sellPartialPaperTrade(50)}
-                  className="bg-orange-600 hover:bg-orange-500 text-white text-sm font-bold px-4 py-2.5 rounded-lg transition-colors"
-                >
-                  SELL 50%
-                </button>
-                <button
-                  onClick={() => { const r = vm.sellPaperTrade(); if ('error' in r) alert(r.error); }}
-                  className="bg-pink-600 hover:bg-pink-500 text-white text-sm font-bold px-4 py-2.5 rounded-lg transition-colors"
-                >
-                  SELL ALL
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Main Grid — Calculator + Scores */}
-      <div className="grid grid-cols-3 gap-5">
-        {/* Left Column — Calculator + Indicators */}
-        <div className="space-y-5">
-          {/* Calculator */}
+          {/* Risk Analysis */}
           <div className="bg-gray-900 rounded-xl p-5 space-y-3">
-            <h2 className="text-sm font-bold text-gray-400 uppercase tracking-wider">Trade Calculator</h2>
-            <div className="space-y-2">
-              <MetricRow label="Entry" value={usd(sig.entryPrice)} infoAction={() => setActiveHelpTopic('entry')} />
-              <MetricRow label="Target 1" value={usd(sig.target1)} color="text-green-400" infoAction={() => setActiveHelpTopic('target1')} />
-              <MetricRow label="Target 2" value={usd(sig.target2)} color="text-green-400" infoAction={() => setActiveHelpTopic('target2')} />
-              <MetricRow label="Breakeven" value={usd(sig.breakevenPrice)} infoAction={() => setActiveHelpTopic('breakeven')} />
-              <MetricRow label="Stop Loss" value={usd(sig.stopLoss)} color="text-pink-400" infoAction={() => setActiveHelpTopic('stopLoss')} />
-              {hasPosition && (
-                <MetricRow label="Open P/L" value={peso(profit)} color={profit >= 0 ? 'text-green-400' : 'text-pink-400'} infoAction={() => setActiveHelpTopic('openProfit')} />
-              )}
-              <MetricRow label="Reward/Risk" value={`${number(sig.rewardRisk)}:1`} infoAction={() => setActiveHelpTopic('rewardRisk')} />
-              <MetricRow label="Position Size" value={`${number(sig.suggestedPositionSize, 6)} BTC`} infoAction={() => setActiveHelpTopic('positionSize')} />
-            </div>
-            {vm.lastUpdated && (
-              <p className="text-xs text-gray-600">Updated {new Date(vm.lastUpdated).toLocaleTimeString()}</p>
+            <h2 className="text-sm font-bold text-gray-400 uppercase tracking-wider">Risk Analysis</h2>
+            {sig.backtest.probability !== null && (
+              <MetricRow label="Backtest Win Rate" value={percent(sig.backtest.probability)} infoAction={() => setActiveHelpTopic('backtest')} />
             )}
+            {sig.backtest.expectedValueR !== null && (
+              <MetricRow label="Expected Value" value={number(sig.backtest.expectedValueR) + 'R'} infoAction={() => setActiveHelpTopic('expectedValue')} />
+            )}
+            {sig.reasons.length > 0 && (
+              <div className="space-y-1">
+                {sig.reasons.map((r, i) => (
+                  <p key={i} className="text-sm text-gray-400">• {r}</p>
+                ))}
+              </div>
+            )}
+            {sig.warnings.length > 0 && (
+              <div className="space-y-1">
+                {sig.warnings.map((w, i) => (
+                  <p key={i} className="text-sm text-orange-400">⚠ {w}</p>
+                ))}
+              </div>
+            )}
+            <p className="text-xs text-gray-600">Backtest results are estimates, not guarantees.</p>
           </div>
 
           {/* Indicators */}
@@ -143,8 +130,25 @@ export default function HomeTab({ vm }: HomeTabProps) {
           </div>
         </div>
 
-        {/* Middle Column — Normal + Pro Score */}
-        <div className="space-y-5">
+        {/* Middle Column — Gauge + Scores */}
+        <div className="space-y-3">
+          {/* Gauge + Decision Tile */}
+          <div className="bg-gray-900 rounded-xl p-5 space-y-3">
+            <h2 className="text-sm font-bold text-gray-400 uppercase tracking-wider text-center">Overall Score</h2>
+            <div className="flex items-center justify-center gap-4">
+              <GaugeChart
+                value={totalScore(sig.buyScore)}
+                max={100}
+                size={180}
+                sublabel={`Pro ${totalScore(sig.buyScore)} / Normal ${normalTotal(sig.normalBuyScore)}`}
+              />
+              <div className="flex flex-col gap-1">
+                <p className={`text-2xl font-bold ${decisionColor(sig.decision)}`}>{sig.decision}</p>
+                <p className={`text-sm font-semibold ${riskColor(sig.risk)}`}>Risk: {sig.risk}</p>
+              </div>
+            </div>
+          </div>
+
           {/* Normal Score */}
           <div className="bg-gray-900 rounded-xl p-5 space-y-3">
             <h2 className="text-sm font-bold text-gray-400 uppercase tracking-wider">Normal Score: {normalTotal(sig.normalBuyScore)} / 100</h2>
@@ -171,8 +175,107 @@ export default function HomeTab({ vm }: HomeTabProps) {
           </div>
         </div>
 
-        {/* Right Column — Sell Score + Risk + Regime */}
-        <div className="space-y-5">
+        {/* Right Column — Buy/Sell + Sell Score + Market Context */}
+        <div className="space-y-3">
+          {/* Buy/Sell Tile */}
+          <div className="bg-gray-900 rounded-xl p-5 flex flex-col items-center justify-center gap-3">
+            <div className="w-full">
+              <label className="text-xs text-gray-400 mb-1 block">Amount ({vm.fiatCurrency})</label>
+              <input
+                type="text"
+                value={vm.investmentAmount.toLocaleString()}
+                onChange={(e) => { const val = e.target.value.replace(/,/g, ''); vm.setInvestmentAmount(Number(val) || 0); }}
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono focus:outline-none focus:border-[#f0b90b] transition-colors"
+              />
+            </div>
+            {!hasPosition && (
+              <div className="w-full space-y-1 border-t border-gray-700 pt-2">
+                <div className="flex justify-between text-xs">
+                  <span className="text-gray-400">Entry</span>
+                  <span className="text-gray-300 font-mono">{fiat(sig.entryPrice)}</span>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-[#0ecb81]">Target 1</span>
+                  <span className="text-[#0ecb81] font-mono">{fiat(sig.target1)}</span>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-[#0ecb81]">Target 2</span>
+                  <span className="text-[#0ecb81] font-mono">{fiat(sig.target2)}</span>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-gray-400">Breakeven</span>
+                  <span className="text-gray-300 font-mono">{fiat(sig.breakevenPrice)}</span>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-[#f6465d]">Stop Loss</span>
+                  <span className="text-[#f6465d] font-mono">{fiat(sig.stopLoss)}</span>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-gray-400">Reward/Risk</span>
+                  <span className="text-gray-300 font-mono">{number(sig.rewardRisk)}:1</span>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-gray-400">Position Size</span>
+                  <span className="text-gray-300 font-mono">{number(sig.suggestedPositionSize, 6)} BTC</span>
+                </div>
+              </div>
+            )}
+            {hasPosition && (
+              <div className="w-full space-y-1 border-t border-gray-700 pt-2">
+                <div className="flex justify-between text-xs">
+                  <span className="text-gray-400">Entry</span>
+                  <span className="text-gray-300 font-mono">{fiat(pt.openPosition!.entryPrice)}</span>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-[#0ecb81]">Target 1</span>
+                  <span className="text-[#0ecb81] font-mono">{fiat(sig.target1)}</span>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-[#0ecb81]">Target 2</span>
+                  <span className="text-[#0ecb81] font-mono">{fiat(sig.target2)}</span>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-gray-400">Breakeven</span>
+                  <span className="text-gray-300 font-mono">{fiat(sig.breakevenPrice)}</span>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-[#f6465d]">Stop Loss</span>
+                  <span className="text-[#f6465d] font-mono">{fiat(sig.stopLoss)}</span>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-gray-400">Reward/Risk</span>
+                  <span className="text-gray-300 font-mono">{number(sig.rewardRisk)}:1</span>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-gray-400">Position Size</span>
+                  <span className="text-gray-300 font-mono">{number(sig.suggestedPositionSize, 6)} BTC</span>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-gray-400">Sell Value</span>
+                  <span className="text-gray-300 font-mono">{fiat(pt.openPosition!.remainingQuantity * sig.price * 0.9995)}</span>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-gray-400">Open P/L</span>
+                  <span className={`font-mono font-bold ${profit >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'}`}>{profit >= 0 ? '+' : ''}{fiat(profit)}</span>
+                </div>
+              </div>
+            )}
+            <div className="w-full flex gap-2">
+              <button
+                onClick={() => { const err = vm.buyPaperTrade(); if (err) alert(err); }}
+                className="flex-1 bg-green-600 hover:bg-green-500 text-white text-xs font-bold py-2.5 rounded-lg transition-colors flex items-center justify-center gap-1.5"
+              >
+                ▲ BUY
+              </button>
+              <button
+                onClick={() => { const r = vm.sellPaperTrade(); if ('error' in r) alert(r.error); }}
+                className="flex-1 bg-pink-600 hover:bg-pink-500 text-white text-xs font-bold py-2.5 rounded-lg transition-colors flex items-center justify-center gap-1.5"
+              >
+                ▼ SELL
+              </button>
+            </div>
+          </div>
+
           {/* Sell Score */}
           {sig.sellScore > 0 && (
             <div className="bg-gray-900 rounded-xl p-5 space-y-3">
@@ -210,32 +313,6 @@ export default function HomeTab({ vm }: HomeTabProps) {
               </p>
             )}
           </div>
-
-          {/* Risk Analysis */}
-          <div className="bg-gray-900 rounded-xl p-5 space-y-3">
-            <h2 className="text-sm font-bold text-gray-400 uppercase tracking-wider">Risk Analysis</h2>
-            {sig.backtest.probability !== null && (
-              <MetricRow label="Backtest Win Rate" value={percent(sig.backtest.probability)} infoAction={() => setActiveHelpTopic('backtest')} />
-            )}
-            {sig.backtest.expectedValueR !== null && (
-              <MetricRow label="Expected Value" value={number(sig.backtest.expectedValueR) + 'R'} infoAction={() => setActiveHelpTopic('expectedValue')} />
-            )}
-            {sig.reasons.length > 0 && (
-              <div className="space-y-1">
-                {sig.reasons.map((r, i) => (
-                  <p key={i} className="text-sm text-gray-400">• {r}</p>
-                ))}
-              </div>
-            )}
-            {sig.warnings.length > 0 && (
-              <div className="space-y-1">
-                {sig.warnings.map((w, i) => (
-                  <p key={i} className="text-sm text-orange-400">⚠ {w}</p>
-                ))}
-              </div>
-            )}
-            <p className="text-xs text-gray-600">Backtest results are estimates, not guarantees.</p>
-          </div>
         </div>
       </div>
     </div>
@@ -253,6 +330,18 @@ function MetricRow({ label, value, color, infoAction }: { label: string; value: 
       </span>
       <span className={`text-sm font-medium ${color ?? 'text-gray-200'}`}>{value}</span>
     </div>
+  );
+}
+
+function CryptoLogo({ pair }: { pair: string }) {
+  const symbol = pair.split('/')[0].toLowerCase();
+  return (
+    <img
+      src={`https://assets.coincap.io/assets/icons/${symbol}@2x.png`}
+      alt={pair}
+      className="w-5 h-5 shrink-0"
+      onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+    />
   );
 }
 

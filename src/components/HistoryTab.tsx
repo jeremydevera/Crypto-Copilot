@@ -2,7 +2,7 @@ interface HistoryTabProps { vm: any; }
 
 export default function HistoryTab({ vm }: HistoryTabProps) {
   // Use ptVersion to force re-renders when paper trading state changes
-  const _version = vm.ptVersion;
+  vm.ptVersion;
   const pt = vm.paperTrading;
 
   return (

@@ -19,8 +19,16 @@ const WSS_BASE_URLS = [
 
 // ---- REST API ----
 
-// CoinGecko timeframe mapping
-const COINGECKO_TIMEFRAMES: Record<string, { days: number; granularity: string }> = {
+// CoinGecko coin ID mapping
+const COINGECKO_COIN_IDS: Record<string, string> = {
+  BTCUSDT: 'bitcoin',
+  ETHUSDT: 'ethereum',
+  SOLUSDT: 'solana',
+  BNBUSDT: 'binancecoin',
+  XRPUSDT: 'ripple',
+  DOGEUSDT: 'dogecoin',
+};
+const COINGECKO_TIMEFRAMES: Record<string, { days: number | string; granularity: string }> = {
   '1m': { days: '0.042', granularity: '' },    // ~1 hour
   '5m': { days: '1', granularity: '' },          // CoinGecko doesn't have 5m, use 1d
   '15m': { days: '1', granularity: '' },
@@ -56,7 +64,8 @@ export async function fetchCandles(symbol: string, timeframe: string, limit: num
   try {
     const cg = COINGECKO_TIMEFRAMES[timeframe];
     const days = cg ? cg.days : '1';
-    const url = `https://api.coingecko.com/api/v3/coins/bitcoin/ohlc?vs_currency=usd&days=${days}`;
+    const coinId = COINGECKO_COIN_IDS[symbol] ?? 'bitcoin';
+    const url = `https://api.coingecko.com/api/v3/coins/${coinId}/ohlc?vs_currency=usd&days=${days}`;
     const res = await fetch(url);
     if (res.ok) {
       const data = await res.json();
@@ -223,7 +232,6 @@ export class BinanceTradeWebSocket {
   private pingInterval: ReturnType<typeof setInterval> | null = null;
   private healthInterval: ReturnType<typeof setInterval> | null = null;
   private lastMessageTime = 0;
-  private urlIndex = 0;
   private symbol = '';
   private onTrade: (t: TradeTick) => void = () => {};
   private onError: (msg: string) => void = () => {};
@@ -234,16 +242,15 @@ export class BinanceTradeWebSocket {
     this.symbol = symbol;
     this.onTrade = onTrade;
     this.onError = onError;
-    this.urlIndex = 0;
     this.isDisconnected = false;
     this.connectToCurrentURL();
     this.startPing();
   }
 
   private connectToCurrentURL() {
-    const stream = `${this.symbol.toLowerCase()}@aggTrade`;
-    const baseURL = WSS_BASE_URLS[this.urlIndex];
-    const url = `${baseURL}/ws/${stream}`;
+    // Use Binance Futures BookTicker for lower latency
+    const stream = `${this.symbol.toLowerCase()}@bookTicker`;
+    const url = `wss://fstream.binance.com/ws/${stream}`;
 
     this.ws = new WebSocket(url);
     this.lastMessageTime = Date.now();
@@ -252,11 +259,13 @@ export class BinanceTradeWebSocket {
       this.lastMessageTime = Date.now();
       try {
         const msg = JSON.parse(event.data);
-        if (msg.p) {
+        // Futures bookTicker: { b: bestBid, B: bestBidQty, a: bestAsk, A: bestAskQty, ... }
+        const price = msg.b ? parseFloat(msg.b) : (msg.a ? parseFloat(msg.a) : null);
+        if (price) {
           this.onTrade({
-            price: parseFloat(msg.p),
-            quantity: parseFloat(msg.q),
-            time: msg.T || Date.now(),
+            price,
+            quantity: msg.B ? parseFloat(msg.B) : 0,
+            time: msg.E || msg.T || Date.now(),
           });
         }
       } catch {}
@@ -304,12 +313,7 @@ export class BinanceTradeWebSocket {
 
   private handleDisconnect(reason: string) {
     this.onError(`Connection lost: ${reason}. Reconnecting...`);
-    this.urlIndex++;
-    if (this.urlIndex < WSS_BASE_URLS.length) {
-      this.connectToCurrentURL();
-    } else {
-      this.urlIndex = 0;
-      setTimeout(() => this.connectToCurrentURL(), 2000);
-    }
+    // Reconnect to the same Futures BookTicker URL after a delay
+    setTimeout(() => this.connectToCurrentURL(), 2000);
   }
 }

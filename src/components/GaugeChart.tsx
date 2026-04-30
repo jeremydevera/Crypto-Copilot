@@ -45,14 +45,6 @@ export default function GaugeChart({ value, max = 100, size = 200, label, sublab
     return '#ef4444'; // red
   };
 
-  // Decision text
-  const getDecision = () => {
-    if (value >= 85) return 'Strong Buy';
-    if (value >= 75) return 'Consider Buy';
-    if (value >= 60) return 'Wait';
-    return 'No Trade';
-  };
-
   const color = getColor();
 
   return (
@@ -92,19 +84,6 @@ export default function GaugeChart({ value, max = 100, size = 200, label, sublab
           fontWeight="bold"
         >
           {Math.round(clampedValue)}
-        </text>
-
-        {/* Decision label */}
-        <text
-          x={cx}
-          y={cy + 14}
-          textAnchor="middle"
-          dominantBaseline="middle"
-          fill={color}
-          fontSize={size * 0.07}
-          fontWeight="600"
-        >
-          {getDecision()}
         </text>
 
         {/* Sublabel */}

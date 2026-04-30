@@ -168,7 +168,6 @@ export function analyze(
 
   // 4H macro direction
   const fourHourBullish = isBullishStructure(fourHourStructure);
-  const fourHourBearish = isBearishStructure(fourHourStructure);
 
   // 1H trading bias
   const oneHourBullish = isBullishStructure(oneHourStructure);
@@ -813,7 +812,7 @@ function riskLevel(score: number, warnings: string[]): RiskLevel {
 
 // ── Hard Filters ─────────────────────────────────────────────
 
-function applyHardFilters(
+export function applyHardFilters(
   marketStructureScore: number,
   entryConfirmationScore: number,
   quote: TradeQuote,
@@ -910,7 +909,7 @@ function determineBias(
 
 function calculateConfidence(
   totalBuyScore: number,
-  backtest: { winRate: number | null; expectedValueR: number | null; total: number }
+  backtest: BacktestEstimate
 ): number {
   // Base confidence from total score (0-100 scale)
   let conf = totalBuyScore;
@@ -921,7 +920,7 @@ function calculateConfidence(
   }
 
   // Reduce if backtest win rate is low
-  if (backtest.winRate !== null && backtest.winRate < 0.4) {
+  if (backtest.probability !== null && backtest.probability < 0.4) {
     conf -= 10;
   }
 

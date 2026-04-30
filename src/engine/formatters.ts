@@ -2,6 +2,31 @@
 // Formatters — Ported from Formatters.swift
 // ============================================================
 
+const CURRENCY_SYMBOLS: Record<string, string> = {
+  USD: '$',
+  PHP: '₱',
+  EUR: '€',
+  GBP: '£',
+  JPY: '¥',
+  KRW: '₩',
+  INR: '₹',
+  AUD: 'A$',
+  CAD: 'C$',
+  SGD: 'S$',
+};
+
+let _fiatCurrency = 'USD';
+
+export function setFiatCurrency(currency: string) {
+  _fiatCurrency = currency;
+}
+
+export function fiat(value: number): string {
+  if (!Number.isFinite(value)) return '--';
+  const sym = CURRENCY_SYMBOLS[_fiatCurrency] ?? _fiatCurrency;
+  return sym + new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
+}
+
 export function usd(value: number): string {
   if (!Number.isFinite(value)) return '--';
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);

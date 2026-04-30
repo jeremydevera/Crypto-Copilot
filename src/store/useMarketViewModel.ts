@@ -5,16 +5,17 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react';
 import type { Candle, TradingSignal, TradeQuote, TradeTick, MarketMicrostructure, DataFreshness, Timeframe } from '../engine/types';
-import { placeholderSignal, connectingFreshness, emptyMicrostructure } from '../engine/types';
+import { placeholderSignal, connectingFreshness, emptyMicrostructure, timeframeSeconds } from '../engine/types';
 import { analyze, calculateTradeQuote, latestSwingLowPublic, nearestSwingHighAbovePricePublic, defaultSlippagePercent } from '../engine/SignalEngine';
-import { BinanceKlineWebSocket, BinanceTradeWebSocket, fetchCandles, fetchBookTicker, fetchDepth } from '../services/BinanceMarketService';
+import { BinanceKlineWebSocket, fetchCandles, fetchBookTicker, fetchDepth } from '../services/BinanceMarketService';
 import { PaperTradingStore } from './PaperTradingStore';
+import { SOCKET_FEEDS, getSocketFeeds, pairToSymbol } from '../data/socketFeeds';
+import type { SoundId } from '../engine/sounds';
+import { playSound } from '../engine/sounds';
 
-const SYMBOL = 'BTCUSDT';
 const MAX_5M_CANDLES = 300;
 const MAX_15M_CANDLES = 200;
-const MAX_1H_CANDLES = 200;
-const MAX_4H_CANDLES = 200;
+const DEFAULT_LIVE_FEED_ID = 'binance-futures-bookticker';
 
 export function useMarketViewModel() {
   // Core state
@@ -40,6 +41,22 @@ export function useMarketViewModel() {
   const [investmentAmount, setInvestmentAmount] = useState(10000);
   const [feeAndSpreadPercent] = useState(0.5);
   const [autoTradeEnabled, setAutoTradeEnabled] = useState(false);
+  const [cryptoPair, setCryptoPair] = useState('BTC/USDT');
+  const [fiatCurrency, setFiatCurrency] = useState('USD');
+  const [selectedLiveFeedId, setSelectedLiveFeedId] = useState(DEFAULT_LIVE_FEED_ID);
+  const [liveFeedStatus, setLiveFeedStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'error'>('disconnected');
+  const [liveFeedLatency, setLiveFeedLatency] = useState<number | null>(null);
+  const [liveFeedMsgCount, setLiveFeedMsgCount] = useState(0);
+  const [buySound, setBuySound] = useState<SoundId>('cash');
+  const [sellSound, setSellSound] = useState<SoundId>('siren');
+  const buySoundRef = useRef<SoundId>('cash');
+  const sellSoundRef = useRef<SoundId>('siren');
+  useEffect(() => { buySoundRef.current = buySound; }, [buySound]);
+  useEffect(() => { sellSoundRef.current = sellSound; }, [sellSound]);
+  const selectedChartTimeframeRef = useRef<Timeframe>('1d');
+
+  // Derived Binance symbol from cryptoPair
+  const symbol = pairToSymbol(cryptoPair);
 
   // Refs for mutable state in callbacks
   const paperTradingRef = useRef(new PaperTradingStore());
@@ -48,13 +65,18 @@ export function useMarketViewModel() {
 
   const klineWsRef = useRef(new BinanceKlineWebSocket());
   const chartWsRef = useRef(new BinanceKlineWebSocket());
-  const tradeWsRef = useRef(new BinanceTradeWebSocket());
+  const liveFeedWsRef = useRef<WebSocket | null>(null);
+  const liveFeedMsgCountRef = useRef(0);
 
   const lastSignalCalcTime = useRef(0);
   const lastLogTime = useRef(0);
   const lastMicroRefreshTime = useRef(0);
   const lastAutoTradeTime = useRef<number>(0);
   const lastNotifiedDecision = useRef<string | null>(null);
+
+  useEffect(() => {
+    selectedChartTimeframeRef.current = selectedChartTimeframe;
+  }, [selectedChartTimeframe]);
 
   // Freshness timer
   useEffect(() => {
@@ -86,7 +108,7 @@ export function useMarketViewModel() {
     fmc: Candle[], fmc15: Candle[], fmc1h: Candle[], fmc4h: Candle[], invAmt: number, feePct: number, pt: PaperTradingStore, ms: MarketMicrostructure
   ) => {
     const newSignal = analyze(
-      SYMBOL, fmc, fmc15, fmc1h, fmc4h, feePct, invAmt, pt.demoBalance,
+      symbol, fmc, fmc15, fmc1h, fmc4h, feePct, invAmt, pt.demoBalance,
       pt.openPosition?.entryPrice ?? null,
       pt.openPosition?.investedAmount ?? null,
       1, ms
@@ -155,9 +177,10 @@ export function useMarketViewModel() {
         const hasPosition = pt.openPosition !== null;
 
         if (!hasPosition && (decision === 'Strong Buy' || decision === 'Consider Buy')) {
-          const err = pt.buy(SYMBOL, modified.price, invAmt);
+          const err = pt.buy(symbol, modified.price, invAmt);
           if (!err) {
             addLog(`[AUTO-TRADE] BUY executed at $${modified.price.toFixed(2)}`);
+            playSound(buySoundRef.current);
             lastAutoTradeTime.current = now;
             setPtVersion(v => v + 1);
           }
@@ -165,13 +188,14 @@ export function useMarketViewModel() {
           const result = pt.sell(modified.price);
           if ('trade' in result) {
             addLog(`[AUTO-TRADE] SELL executed at $${modified.price.toFixed(2)}`);
+            playSound(sellSoundRef.current);
             lastAutoTradeTime.current = now;
             setPtVersion(v => v + 1);
           }
         }
       }
     }
-  }, [autoTradeEnabled]);
+  }, [autoTradeEnabled, symbol]);
 
   const handleLiveTrade = useCallback((trade: TradeTick) => {
     const now = Date.now();
@@ -238,32 +262,148 @@ export function useMarketViewModel() {
   const refreshMicrostructure = async (_logRaw: boolean = false) => {
     try {
       const [ticker, depth] = await Promise.all([
-        fetchBookTicker(SYMBOL),
-        fetchDepth(SYMBOL, 10),
+        fetchBookTicker(symbol),
+        fetchDepth(symbol, 10),
       ]);
       setMicrostructure({ bookTicker: ticker, orderBook: depth });
     } catch {}
   };
 
+  const updateSelectedChartPrice = useCallback((price: number, quantity: number = 0, time: number = Date.now()) => {
+    if (!Number.isFinite(price) || price <= 0) return;
+
+    const intervalMs = timeframeSeconds(selectedChartTimeframeRef.current) * 1000;
+    const openTime = Math.floor(time / intervalMs) * intervalMs;
+
+    setSelectedChartCandles(prev => {
+      const updated = [...prev];
+      const idx = updated.findIndex(c => c.openTime === openTime);
+
+      if (idx >= 0) {
+        const c = updated[idx];
+        updated[idx] = {
+          ...c,
+          high: Math.max(c.high, price),
+          low: Math.min(c.low, price),
+          close: price,
+          volume: c.volume + Math.max(quantity, 0),
+        };
+      } else {
+        const lastIdx = updated.length - 1;
+        const open = lastIdx >= 0 ? updated[lastIdx].close : price;
+        updated.push({
+          openTime,
+          open,
+          high: Math.max(open, price),
+          low: Math.min(open, price),
+          close: price,
+          volume: Math.max(quantity, 0),
+        });
+      }
+
+      return normalizeCandles(updated, 500);
+    });
+
+    setLastUpdated(Date.now());
+  }, []);
+
+  const disconnectLiveFeed = useCallback(() => {
+    if (liveFeedWsRef.current) {
+      liveFeedWsRef.current.close();
+      liveFeedWsRef.current = null;
+    }
+    setLiveFeedStatus('disconnected');
+    setLiveFeedLatency(null);
+    setLiveFeedMsgCount(0);
+    liveFeedMsgCountRef.current = 0;
+  }, []);
+
+  const connectLiveFeed = useCallback((feedId: string = selectedLiveFeedId) => {
+    const feeds = getSocketFeeds(cryptoPair);
+    const feed = feeds.find(f => f.id === feedId) ?? feeds.find(f => f.id === DEFAULT_LIVE_FEED_ID) ?? feeds[0];
+    if (!feed) return;
+
+    if (liveFeedWsRef.current) {
+      liveFeedWsRef.current.close();
+      liveFeedWsRef.current = null;
+    }
+
+    setSelectedLiveFeedId(feed.id);
+    setLiveFeedStatus('connecting');
+    setLiveFeedLatency(null);
+    setLiveFeedMsgCount(0);
+    liveFeedMsgCountRef.current = 0;
+    setStatusMessage(`Connecting ${feed.label}...`);
+
+    try {
+      const ws = new WebSocket(feed.endpoint);
+      liveFeedWsRef.current = ws;
+
+      ws.onopen = () => {
+        setLiveFeedStatus('connected');
+        setStatusMessage(`Live feed: ${feed.label}`);
+        if (feed.subscribe) ws.send(feed.subscribe);
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          const price = feed.parsePrice(msg);
+          if (price === null || Number.isNaN(price) || price <= 0) return;
+
+          const eventTime = feed.parseEventTime(msg);
+          const latency = eventTime ? Date.now() - eventTime : null;
+          if (latency !== null && Number.isFinite(latency)) setLiveFeedLatency(latency);
+
+          liveFeedMsgCountRef.current += 1;
+          setLiveFeedMsgCount(liveFeedMsgCountRef.current);
+
+          const tickTime = Date.now();
+          const quantity = extractFeedQuantity(msg);
+          handleLiveTrade({ price, quantity, time: tickTime });
+          updateSelectedChartPrice(price, quantity, tickTime);
+        } catch {}
+      };
+
+      ws.onerror = () => {
+        if (liveFeedWsRef.current !== ws) return;
+        setLiveFeedStatus('error');
+        setStatusMessage(`Live feed error: ${feed.label}`);
+      };
+
+      ws.onclose = () => {
+        if (liveFeedWsRef.current !== ws) return;
+        setLiveFeedStatus(prev => (prev === 'error' ? prev : 'disconnected'));
+      };
+    } catch {
+      setLiveFeedStatus('error');
+      setStatusMessage(`Live feed error: ${feed.label}`);
+    }
+  }, [handleLiveTrade, selectedLiveFeedId, updateSelectedChartPrice, cryptoPair]);
+
+  const applyLiveFeed = useCallback((feedId: string) => {
+    connectLiveFeed(feedId);
+  }, [connectLiveFeed]);
+
   const refreshAll = async () => {
     setIsLoading(true);
-    setStatusMessage('Syncing BTC/USDT history...');
+    setStatusMessage(`Syncing ${cryptoPair} history...`);
     addRestLog('Initiating REST API fetch...');
 
     try {
       const [new5m, new15m, new1h, new4h, newChart] = await Promise.all([
-        fetchCandles(SYMBOL, '5m', 300),
-        fetchCandles(SYMBOL, '15m', 200),
-        fetchCandles(SYMBOL, '1h', 200),
-        fetchCandles(SYMBOL, '4h', 200),
-        fetchCandles(SYMBOL, selectedChartTimeframe, 500),
+        fetchCandles(symbol, '5m', 300),
+        fetchCandles(symbol, '15m', 200),
+        fetchCandles(symbol, '1h', 200),
+        fetchCandles(symbol, '4h', 200),
+        fetchCandles(symbol, selectedChartTimeframe, 500),
       ]);
 
       setFiveMinuteCandles(new5m);
       setFifteenMinuteCandles(new15m);
       setOneHourCandles(new1h);
       setFourHourCandles(new4h);
-      if (newChart.length > 0) setSelectedChartCandles(newChart);
+      if (newChart.length > 0) setSelectedChartCandles(normalizeCandles(newChart, 500));
 
       await refreshMicrostructure(true);
       setStatusMessage('Live Real-Time Data Connected');
@@ -277,16 +417,11 @@ export function useMarketViewModel() {
   };
 
   const start = useCallback(() => {
-    // Connect trade WebSocket
-    tradeWsRef.current.connect(
-      SYMBOL,
-      (trade) => handleLiveTrade(trade),
-      (msg) => addLog(`Trade WSS Error: ${msg}`),
-    );
+    connectLiveFeed(selectedLiveFeedId);
 
     // Connect kline WebSocket
     klineWsRef.current.connect(
-      SYMBOL,
+      symbol,
       '5m',
       (candle) => {
         setLastUpdated(Date.now());
@@ -305,68 +440,126 @@ export function useMarketViewModel() {
       (msg) => addLog(`Signal WSS Error: ${msg}`),
     );
 
-    // Connect chart WebSocket
-    if (selectedChartTimeframe !== '1s') {
-      chartWsRef.current.connect(
-        SYMBOL,
-        selectedChartTimeframe,
-        (candle) => {
-          setLastUpdated(Date.now());
-          setSelectedChartCandles(prev => {
-            const idx = prev.findIndex(c => c.openTime === candle.openTime);
-            if (idx >= 0) {
-              const updated = [...prev];
-              updated[idx] = candle;
-              return updated;
-            }
-            const updated = [...prev, candle];
-            if (updated.length > 500) updated.shift();
-            return updated;
-          });
-        },
-        (msg) => addLog(`Chart WSS Error: ${msg}`),
-      );
-    }
-
     refreshAll();
-  }, [selectedChartTimeframe, handleLiveTrade, addLog]);
+  }, [connectLiveFeed, selectedLiveFeedId, addLog, symbol]);
 
-  // Auto-start
   useEffect(() => {
     start();
     return () => {
+      disconnectLiveFeed();
       klineWsRef.current.disconnect();
       chartWsRef.current.disconnect();
-      tradeWsRef.current.disconnect();
     };
   }, []);
 
+  // Reconnect everything when crypto pair changes
+  useEffect(() => {
+    // Clear all candle data for the new pair
+    setFiveMinuteCandles([]);
+    setFifteenMinuteCandles([]);
+    setOneHourCandles([]);
+    setFourHourCandles([]);
+    setSelectedChartCandles([]);
+    setSignal(placeholderSignal);
+    setActiveSignal(placeholderSignal);
+
+    // Reconnect kline WebSocket for new pair
+    klineWsRef.current.disconnect();
+    klineWsRef.current.connect(
+      symbol,
+      '5m',
+      (candle) => {
+        setLastUpdated(Date.now());
+        setFiveMinuteCandles(prev => {
+          const idx = prev.findIndex(c => c.openTime === candle.openTime);
+          if (idx >= 0) {
+            const updated = [...prev];
+            updated[idx] = candle;
+            return updated;
+          }
+          const updated = [...prev, candle];
+          if (updated.length > MAX_5M_CANDLES) updated.shift();
+          return updated;
+        });
+      },
+      (msg) => addLog(`Signal WSS Error: ${msg}`),
+    );
+
+    // Reconnect live feed for new pair
+    disconnectLiveFeed();
+    const feeds = getSocketFeeds(cryptoPair);
+    const currentFeed = feeds.find(f => f.id === selectedLiveFeedId) ?? feeds.find(f => f.id === DEFAULT_LIVE_FEED_ID) ?? feeds[0];
+    if (currentFeed) connectLiveFeed(currentFeed.id);
+
+    // Fetch candles for new pair
+    refreshAll();
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cryptoPair]);
+
+  // Reconnect chart WebSocket when timeframe changes
+  useEffect(() => {
+    setSelectedChartCandles([]);
+    chartWsRef.current.disconnect();
+    chartWsRef.current.connect(
+      symbol,
+      selectedChartTimeframe,
+      (candle) => {
+        setLastUpdated(Date.now());
+        setSelectedChartCandles(prev => {
+          const idx = prev.findIndex(c => c.openTime === candle.openTime);
+          let updated: Candle[];
+          if (idx >= 0) {
+            updated = [...prev];
+            updated[idx] = candle;
+          } else {
+            updated = [...prev, candle];
+          }
+          return normalizeCandles(updated, 500);
+        });
+      },
+      (msg) => addLog(`Chart WSS Error: ${msg}`),
+    );
+
+    // Also fetch initial chart data for the new timeframe
+    fetchCandles(symbol, selectedChartTimeframe, 500).then(newChart => {
+      if (newChart.length > 0) setSelectedChartCandles(normalizeCandles(newChart, 500));
+    }).catch(() => {});
+
+    return () => {
+      chartWsRef.current.disconnect();
+    };
+  }, [selectedChartTimeframe, symbol, addLog]);
+
   // Paper trading helpers
   const buyPaperTrade = useCallback((): string | null => {
-    const err = paperTrading.buy(SYMBOL, signal.price, investmentAmount);
+    const err = paperTrading.buy(symbol, signal.price, investmentAmount);
     if (err) return err;
     lastNotifiedDecision.current = null;
     addLog(`Manual BUY Executed at $${signal.price}`);
+    playSound(buySound);
     setPtVersion(v => v + 1);
     return null;
-  }, [signal.price, investmentAmount, paperTrading, addLog]);
+  }, [signal.price, investmentAmount, paperTrading, addLog, buySound, symbol]);
 
   const sellPaperTrade = useCallback((): { trade: ClosedPaperTrade } | { error: string } => {
     const result = paperTrading.sell(signal.price);
     if ('error' in result) return result;
     lastNotifiedDecision.current = null;
     addLog(`Manual SELL Executed at $${signal.price}`);
+    playSound(sellSound);
     setPtVersion(v => v + 1);
     return result;
-  }, [signal.price, paperTrading, addLog]);
+  }, [signal.price, paperTrading, addLog, sellSound]);
 
   const sellPartialPaperTrade = useCallback((percent: number) => {
     const result = paperTrading.sellPartial(signal.price, percent);
     if ('error' in result) return result;
     addLog(`Partial SELL ${percent}% Executed at $${signal.price}`);
+    playSound(sellSound);
     setPtVersion(v => v + 1);
     return result;
-  }, [signal.price, paperTrading, addLog]);
+  }, [signal.price, paperTrading, addLog, sellSound]);
 
   return {
     // State
@@ -375,15 +568,38 @@ export function useMarketViewModel() {
     statusMessage, isLoading, lastUpdated, dataFreshness,
     microstructure, devLogs, restLogs,
     selectedChartTimeframe, investmentAmount, feeAndSpreadPercent,
-    autoTradeEnabled,
+    autoTradeEnabled, cryptoPair, fiatCurrency,
+    buySound, sellSound,
+    selectedLiveFeedId, liveFeedStatus, liveFeedLatency, liveFeedMsgCount,
     paperTrading, ptVersion,
 
     // Actions
     setSelectedChartTimeframe, setInvestmentAmount,
-    setAutoTradeEnabled,
+    setAutoTradeEnabled, setCryptoPair, setFiatCurrency,
+    setBuySound, setSellSound,
+    updateSelectedChartPrice,
+    applyLiveFeed, connectLiveFeed, disconnectLiveFeed,
     buyPaperTrade, sellPaperTrade, sellPartialPaperTrade,
     start, refreshAll,
   };
 }
 
 import type { ClosedPaperTrade } from '../engine/types';
+
+function normalizeCandles(candles: Candle[], limit: number): Candle[] {
+  const byOpenTime = new Map<number, Candle>();
+  candles.forEach(candle => {
+    if (Number.isFinite(candle.openTime)) {
+      byOpenTime.set(candle.openTime, candle);
+    }
+  });
+
+  const sorted = Array.from(byOpenTime.values()).sort((a, b) => a.openTime - b.openTime);
+  return sorted.length > limit ? sorted.slice(sorted.length - limit) : sorted;
+}
+
+function extractFeedQuantity(msg: any): number {
+  const raw = msg.q ?? msg.Q ?? msg.B ?? msg.A ?? msg.l ?? 0;
+  const quantity = typeof raw === 'number' ? raw : parseFloat(raw);
+  return Number.isFinite(quantity) ? quantity : 0;
+}

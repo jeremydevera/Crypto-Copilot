@@ -28,20 +28,21 @@ export default function App() {
   // Update browser tab title with live price
   useEffect(() => {
     const price = vm.activeSignal?.price;
+    const pair = vm.cryptoPair ?? 'BTC/USDT';
     if (price && price > 0) {
-      document.title = `BTC $${price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} - Trading Copilot`;
+      document.title = `${pair} $${price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} - Trading Copilot`;
     } else {
       document.title = 'Trading Copilot';
     }
-  }, [vm.activeSignal?.price]);
+  }, [vm.activeSignal?.price, vm.cryptoPair]);
 
   return (
-    <div className="min-h-screen bg-gray-950 text-gray-100 flex">
+    <div className="h-screen bg-gray-950 text-gray-100 flex overflow-hidden">
       {/* Sidebar */}
       <aside className="w-56 bg-gray-900 border-r border-gray-800 flex flex-col shrink-0">
         <div className="p-5 border-b border-gray-800">
           <h1 className="text-base font-bold text-white">Trading Copilot</h1>
-          <p className="text-xs text-gray-500 mt-0.5">BTC/USDT Real-time</p>
+          <p className="text-xs text-gray-500 mt-0.5">Crypto Analyzer</p>
         </div>
         <nav className="flex-1 py-3 space-y-1 px-2">
           {TABS.map(tab => (
@@ -61,10 +62,7 @@ export default function App() {
           <NotificationPanel vm={vm} />
         </nav>
         <div className="p-4 border-t border-gray-800">
-          <div className="flex items-center gap-2">
-            <div className={`w-2 h-2 rounded-full ${vm.dataFreshness.kind === 'live' ? 'bg-green-500' : vm.dataFreshness.kind === 'delayed' ? 'bg-yellow-500' : vm.dataFreshness.kind === 'stale' ? 'bg-orange-500' : 'bg-gray-600'}`} />
-            <span className="text-xs text-gray-500">{vm.statusMessage}</span>
-          </div>
+          <p className="text-[10px] text-gray-500 leading-tight">Developed by<br/>Jeremy De Vera</p>
         </div>
       </aside>
 

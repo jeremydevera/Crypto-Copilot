@@ -12,13 +12,45 @@ export interface SocketFeedConfig {
   parseEventTime: (msg: any) => number | null;
 }
 
-export const SOCKET_FEEDS: SocketFeedConfig[] = [
+/** Convert display pair like "BTC/USDT" to Binance symbol "BTCUSDT" */
+export function pairToSymbol(pair: string): string {
+  return pair.replace('/', '').toUpperCase();
+}
+
+/** Convert display pair to lowercase stream name like "btcusdt" */
+export function pairToStream(pair: string): string {
+  return pair.replace('/', '').toLowerCase();
+}
+
+/** Convert display pair to OKX instId like "BTC-USDT" */
+export function pairToOkxInstId(pair: string): string {
+  return pair.replace('/', '-').toUpperCase();
+}
+
+/** Convert display pair to Gate.io format like "BTC_USDT" */
+export function pairToGateioSymbol(pair: string): string {
+  return pair.replace('/', '_').toUpperCase();
+}
+
+/** Convert display pair to Bybit format like "BTCUSDT" */
+export function pairToBybitSymbol(pair: string): string {
+  return pair.replace('/', '').toUpperCase();
+}
+
+export function getSocketFeeds(pair: string = 'BTC/USDT'): SocketFeedConfig[] {
+  const sym = pairToSymbol(pair);
+  const stream = pairToStream(pair);
+  const okxInstId = pairToOkxInstId(pair);
+  const gateioSym = pairToGateioSymbol(pair);
+  const bybitSym = pairToBybitSymbol(pair);
+
+  return [
   // ── Binance ──
   {
     id: 'binance-trade',
     provider: 'Binance',
     label: 'Binance Trade',
-    endpoint: 'wss://stream.binance.com:9443/ws/btcusdt@trade',
+    endpoint: `wss://stream.binance.com:9443/ws/${stream}@trade`,
     color: '#f0b90b',
     parsePrice: (msg: any) => parseFloat(msg.p),
     parseEventTime: (msg: any) => msg.T ?? null,
@@ -27,7 +59,7 @@ export const SOCKET_FEEDS: SocketFeedConfig[] = [
     id: 'binance-bookticker',
     provider: 'Binance',
     label: 'Binance BookTicker',
-    endpoint: 'wss://stream.binance.com:9443/ws/btcusdt@bookTicker',
+    endpoint: `wss://stream.binance.com:9443/ws/${stream}@bookTicker`,
     color: '#f0b90b',
     parsePrice: (msg: any) => parseFloat(msg.b),
     parseEventTime: (msg: any) => msg.E ?? null,
@@ -36,7 +68,7 @@ export const SOCKET_FEEDS: SocketFeedConfig[] = [
     id: 'binance-aggtrade',
     provider: 'Binance',
     label: 'Binance AggTrade',
-    endpoint: 'wss://stream.binance.com:9443/ws/btcusdt@aggTrade',
+    endpoint: `wss://stream.binance.com:9443/ws/${stream}@aggTrade`,
     color: '#f0b90b',
     parsePrice: (msg: any) => parseFloat(msg.p),
     parseEventTime: (msg: any) => msg.E ?? null,
@@ -45,7 +77,7 @@ export const SOCKET_FEEDS: SocketFeedConfig[] = [
     id: 'binance-depth',
     provider: 'Binance',
     label: 'Binance Depth 100ms',
-    endpoint: 'wss://stream.binance.com:9443/ws/btcusdt@depth@100ms',
+    endpoint: `wss://stream.binance.com:9443/ws/${stream}@depth@100ms`,
     color: '#f0b90b',
     parsePrice: (msg: any) => msg.b?.[0]?.[0] ? parseFloat(msg.b[0][0]) : null,
     parseEventTime: (msg: any) => msg.E ?? null,
@@ -54,7 +86,7 @@ export const SOCKET_FEEDS: SocketFeedConfig[] = [
     id: 'binance-futures-trade',
     provider: 'Binance Futures',
     label: 'Binance Futures Trade',
-    endpoint: 'wss://fstream.binance.com/ws/btcusdt@trade',
+    endpoint: `wss://fstream.binance.com/ws/${stream}@trade`,
     color: '#f0b90b',
     parsePrice: (msg: any) => parseFloat(msg.p),
     parseEventTime: (msg: any) => msg.T ?? null,
@@ -63,7 +95,7 @@ export const SOCKET_FEEDS: SocketFeedConfig[] = [
     id: 'binance-futures-bookticker',
     provider: 'Binance Futures',
     label: 'Binance Futures BookTicker',
-    endpoint: 'wss://fstream.binance.com/ws/btcusdt@bookTicker',
+    endpoint: `wss://fstream.binance.com/ws/${stream}@bookTicker`,
     color: '#f0b90b',
     parsePrice: (msg: any) => parseFloat(msg.b),
     parseEventTime: (msg: any) => msg.E ?? null,
@@ -77,7 +109,7 @@ export const SOCKET_FEEDS: SocketFeedConfig[] = [
     color: '#0052ff',
     subscribe: JSON.stringify({
       type: 'subscribe',
-      product_ids: ['BTC-USD'],
+      product_ids: [`${sym.slice(0, -4)}-USD`],
       channels: ['ticker'],
     }),
     parsePrice: (msg: any) => parseFloat(msg.price),
@@ -91,7 +123,7 @@ export const SOCKET_FEEDS: SocketFeedConfig[] = [
     color: '#0052ff',
     subscribe: JSON.stringify({
       type: 'subscribe',
-      product_ids: ['BTC-USD'],
+      product_ids: [`${sym.slice(0, -4)}-USD`],
       channels: ['level2_batch'],
     }),
     parsePrice: (msg: any) => msg.changes?.[0]?.[1] ? parseFloat(msg.changes[0][1]) : null,
@@ -106,7 +138,7 @@ export const SOCKET_FEEDS: SocketFeedConfig[] = [
     color: '#ffffff',
     subscribe: JSON.stringify({
       op: 'subscribe',
-      args: [{ channel: 'tickers', instId: 'BTC-USDT' }],
+      args: [{ channel: 'tickers', instId: okxInstId }],
     }),
     parsePrice: (msg: any) => msg.data?.[0]?.last ? parseFloat(msg.data[0].last) : null,
     parseEventTime: (msg: any) => msg.data?.[0]?.ts ? parseInt(msg.data[0].ts) : null,
@@ -119,7 +151,7 @@ export const SOCKET_FEEDS: SocketFeedConfig[] = [
     color: '#ffffff',
     subscribe: JSON.stringify({
       op: 'subscribe',
-      args: [{ channel: 'trades', instId: 'BTC-USDT' }],
+      args: [{ channel: 'trades', instId: okxInstId }],
     }),
     parsePrice: (msg: any) => msg.data?.[0]?.px ? parseFloat(msg.data[0].px) : null,
     parseEventTime: (msg: any) => msg.data?.[0]?.ts ? parseInt(msg.data[0].ts) : null,
@@ -133,7 +165,7 @@ export const SOCKET_FEEDS: SocketFeedConfig[] = [
     color: '#f7a600',
     subscribe: JSON.stringify({
       op: 'subscribe',
-      args: ['tickers.BTCUSDT'],
+      args: [`tickers.${bybitSym}`],
     }),
     parsePrice: (msg: any) => msg.data?.lastPrice ? parseFloat(msg.data.lastPrice) : null,
     parseEventTime: (msg: any) => msg.data?.ts ? parseInt(msg.data.ts) : null,
@@ -146,7 +178,7 @@ export const SOCKET_FEEDS: SocketFeedConfig[] = [
     color: '#f7a600',
     subscribe: JSON.stringify({
       op: 'subscribe',
-      args: ['tickers.BTCUSDT'],
+      args: [`tickers.${bybitSym}`],
     }),
     parsePrice: (msg: any) => msg.data?.lastPrice ? parseFloat(msg.data.lastPrice) : null,
     parseEventTime: (msg: any) => msg.data?.ts ? parseInt(msg.data.ts) : null,
@@ -159,7 +191,7 @@ export const SOCKET_FEEDS: SocketFeedConfig[] = [
     color: '#f7a600',
     subscribe: JSON.stringify({
       op: 'subscribe',
-      args: ['publicTrade.BTCUSDT'],
+      args: [`publicTrade.${bybitSym}`],
     }),
     parsePrice: (msg: any) => msg.data?.[0]?.price ? parseFloat(msg.data[0].price) : null,
     parseEventTime: (msg: any) => msg.data?.[0]?.ts ? parseInt(msg.data[0].ts) : null,
@@ -173,11 +205,11 @@ export const SOCKET_FEEDS: SocketFeedConfig[] = [
     color: '#7b61ff',
     subscribe: JSON.stringify({
       event: 'subscribe',
-      pair: ['XBT/USD'],
+      pair: [`${sym.slice(0, -4)}/USD`],
       subscription: { name: 'ticker' },
     }),
     parsePrice: (msg: any) => Array.isArray(msg) && msg[1]?.c?.[0] ? parseFloat(msg[1].c[0]) : null,
-    parseEventTime: (msg: any) => null,
+    parseEventTime: (_msg: any) => null,
   },
   {
     id: 'kraken-trade',
@@ -187,7 +219,7 @@ export const SOCKET_FEEDS: SocketFeedConfig[] = [
     color: '#7b61ff',
     subscribe: JSON.stringify({
       event: 'subscribe',
-      pair: ['XBT/USD'],
+      pair: [`${sym.slice(0, -4)}/USD`],
       subscription: { name: 'trade' },
     }),
     parsePrice: (msg: any) => Array.isArray(msg) && msg[1]?.[0]?.[0] ? parseFloat(msg[1][0][0]) : null,
@@ -204,7 +236,7 @@ export const SOCKET_FEEDS: SocketFeedConfig[] = [
       time: Math.floor(Date.now() / 1000),
       channel: 'spot.tickers',
       event: 'subscribe',
-      payload: ['BTC_USDT'],
+      payload: [gateioSym],
     }),
     parsePrice: (msg: any) => msg.result?.last ? parseFloat(msg.result.last) : null,
     parseEventTime: (msg: any) => msg.result?.timestamp ? Math.floor(msg.result.timestamp / 1000) : null,
@@ -218,7 +250,7 @@ export const SOCKET_FEEDS: SocketFeedConfig[] = [
     color: '#00f0ff',
     subscribe: JSON.stringify({
       op: 'subscribe',
-      args: [{ instType: 'SPOT', channel: 'tickers', instId: 'BTCUSDT' }],
+      args: [{ instType: 'SPOT', channel: 'tickers', instId: sym }],
     }),
     parsePrice: (msg: any) => msg.data?.[0]?.lastPr ? parseFloat(msg.data[0].lastPr) : null,
     parseEventTime: (msg: any) => msg.data?.[0]?.ts ? parseInt(msg.data[0].ts) : null,
@@ -232,9 +264,13 @@ export const SOCKET_FEEDS: SocketFeedConfig[] = [
     color: '#00d4aa',
     subscribe: JSON.stringify({
       method: 'SUBSCRIPTION',
-      params: ['spot@public.ticker.v3.api@BTCUSDT'],
+      params: [`spot@public.ticker.v3.api@${sym}`],
     }),
     parsePrice: (msg: any) => msg.d?.c ? parseFloat(msg.d.c) : null,
     parseEventTime: (msg: any) => msg.d?.t ? parseInt(msg.d.t) : null,
   },
-];
+  ];
+}
+
+/** Default feeds for BTC/USDT (backward compatible) */
+export const SOCKET_FEEDS = getSocketFeeds('BTC/USDT');
