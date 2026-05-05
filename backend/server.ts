@@ -162,10 +162,15 @@ app.get('/api/cached-signal/:symbol', (req, res) => {
   const symbol = (req.params.symbol || 'BTCUSDT').toUpperCase();
   const signal = getCachedSignal(symbol);
   const cachedData = getCachedData(symbol);
+  const now = Date.now();
+  const ageSeconds = cachedData.lastUpdated > 0 ? Math.round((now - cachedData.lastUpdated) / 1000) : -1;
   res.json({
     ...signal,
     microstructure: cachedData.microstructure,
-    timestamp: Date.now(),
+    cached: true,
+    updatedAt: cachedData.lastUpdated,
+    ageSeconds,
+    timestamp: now,
   });
 });
 

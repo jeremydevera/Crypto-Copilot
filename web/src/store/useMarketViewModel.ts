@@ -332,26 +332,35 @@ export function useMarketViewModel() {
     try {
       // Use cached signal by default — no Binance API call needed
       // Backend auto-refreshes signals every 30s, so cached data is always fresh
-      const latestSignal = await fetchCachedSignal(symbol);
+      const response = await fetchCachedSignal(symbol);
+
+      // Check if cached signal is stale (>90s old)
+      const ageSeconds = (response as any).ageSeconds ?? -1;
+      if (ageSeconds > 90) {
+        addRestLog(`⚠️ Cached signal is ${ageSeconds}s old — may be stale`);
+        setDataFreshness({ kind: 'delayed', delay: ageSeconds });
+      } else if (ageSeconds >= 0) {
+        setDataFreshness({ kind: ageSeconds < 5 ? 'live' : 'delayed', delay: ageSeconds });
+      }
 
       // Preserve live price if we already have one (backend signal price can be stale)
-      const livePrice = livePriceRef.current > 0 ? livePriceRef.current : latestSignal.price;
-      const mergedSignal = { ...latestSignal, price: livePrice };
+      const livePrice = livePriceRef.current > 0 ? livePriceRef.current : response.price;
+      const mergedSignal = { ...response, price: livePrice };
       setSignal(mergedSignal);
       setActiveSignal(mergedSignal);
       setLastUpdated(Date.now());
 
-      if (latestSignal.microstructure) {
-        setMicrostructure(latestSignal.microstructure);
+      if (response.microstructure) {
+        setMicrostructure(response.microstructure);
       }
 
       const usdInvestment = fiatCurrency === 'USD' ? investmentAmount : investmentAmount / getExchangeRate();
       const qSwingLow = latestSwingLowPublic(fiveMinuteCandles);
-      const qNextRes = nearestSwingHighAbovePricePublic(fiveMinuteCandles, latestSignal.entryPrice * 1.005);
-      const qFarRes = nearestSwingHighAbovePricePublic(fiveMinuteCandles, latestSignal.entryPrice * 1.02);
+      const qNextRes = nearestSwingHighAbovePricePublic(fiveMinuteCandles, response.entryPrice * 1.005);
+      const qFarRes = nearestSwingHighAbovePricePublic(fiveMinuteCandles, response.entryPrice * 1.02);
       setTradeQuote(calculateTradeQuote(
         usdInvestment,
-        latestSignal.entryPrice,
+        response.entryPrice,
         feeAndSpreadPercent,
         defaultSlippagePercent,
         qSwingLow ?? null,
@@ -360,6 +369,7 @@ export function useMarketViewModel() {
       ));
     } catch (e: any) {
       addRestLog(`Cached signal delayed: ${e.message}`);
+      setDataFreshness({ kind: 'offline', delay: 999 });
       // Fallback: recalculate locally if backend is unavailable
       if (fiveMinuteCandles.length > 0 && fifteenMinuteCandles.length > 0) {
         const usdInvestment = fiatCurrency === 'USD' ? investmentAmount : investmentAmount / getExchangeRate();
@@ -464,8 +474,8 @@ export function useMarketViewModel() {
     addRestLog('Initiating backend API fetch...');
 
     try {
-      addRestLog(`Fetching ${symbol} candles (5m,15m,1h,4h) + signal...`);
-      const [new5m, new15m, new1h, new4h, latestSignal] = await Promise.all([
+      addRestLog(`Fetching ${symbol} candles (5m,15m,1h,4h) + cached signal...`);
+      const [new5m, new15m, new1h, new4h, signalResponse] = await Promise.all([
         fetchCandles(symbol, '5m', 300),
         fetchCandles(symbol, '15m', 200),
         fetchCandles(symbol, '1h', 200),
@@ -474,20 +484,27 @@ export function useMarketViewModel() {
       ]);
 
       addRestLog(`Candles received: 5m=${new5m.length}, 15m=${new15m.length}, 1h=${new1h.length}, 4h=${new4h.length}`);
+
+      // Check if cached signal is stale
+      const ageSeconds = (signalResponse as any).ageSeconds ?? -1;
+      if (ageSeconds > 90) {
+        addRestLog(`⚠️ Cached signal is ${ageSeconds}s old — data may be stale`);
+      }
+
       setFiveMinuteCandles(new5m);
       setFifteenMinuteCandles(new15m);
       setOneHourCandles(new1h);
       setFourHourCandles(new4h);
 
       // Preserve live price if we already have one (backend signal price can be stale)
-      const livePrice = livePriceRef.current > 0 ? livePriceRef.current : latestSignal.price;
-      const mergedSignal = { ...latestSignal, price: livePrice };
+      const livePrice = livePriceRef.current > 0 ? livePriceRef.current : signalResponse.price;
+      const mergedSignal = { ...signalResponse, price: livePrice };
       setSignal(mergedSignal);
       setActiveSignal(mergedSignal);
 
       // Cached signal includes microstructure
-      if (latestSignal.microstructure) {
-        setMicrostructure(latestSignal.microstructure);
+      if (signalResponse.microstructure) {
+        setMicrostructure(signalResponse.microstructure);
       }
 
       const wsStatus = backendWsConnectedRef.current ? 'Live price connected' : 'Live price pending';
@@ -769,6 +786,54 @@ export function useMarketViewModel() {
     setChartRefreshTrigger(v => v + 1);
   }, []);
 
+  // Force a full refresh from backend (calls /api/signal which triggers Binance data fetch)
+  const forceRefresh = useCallback(async (): Promise<{ success: boolean; message: string }> => {
+    setIsLoading(true);
+    setStatusMessage(`Force refreshing ${cryptoPair}...`);
+    addRestLog('Force refresh — calling /api/signal (full Binance fetch)...');
+
+    try {
+      const usdInvestment = fiatCurrency === 'USD' ? investmentAmount : investmentAmount / getExchangeRate();
+      const [new5m, new15m, new1h, new4h, latestSignal] = await Promise.all([
+        fetchCandles(symbol, '5m', 300),
+        fetchCandles(symbol, '15m', 200),
+        fetchCandles(symbol, '1h', 200),
+        fetchCandles(symbol, '4h', 200),
+        fetchBackendSignal(symbol, {
+          mode: 'pro',
+          investmentAmount: usdInvestment,
+          demoBalance: paperTrading.demoBalance,
+          riskPercent: 1,
+          feeAndSpreadPercent,
+        }),
+      ]);
+
+      setFiveMinuteCandles(new5m);
+      setFifteenMinuteCandles(new15m);
+      setOneHourCandles(new1h);
+      setFourHourCandles(new4h);
+
+      const livePrice = livePriceRef.current > 0 ? livePriceRef.current : latestSignal.price;
+      const mergedSignal = { ...latestSignal, price: livePrice };
+      setSignal(mergedSignal);
+      setActiveSignal(mergedSignal);
+
+      if (latestSignal.microstructure) {
+        setMicrostructure(latestSignal.microstructure);
+      }
+
+      setLastUpdated(Date.now());
+      setDataFreshness({ kind: 'live', delay: 0 });
+      addRestLog('Force refresh complete');
+      setIsLoading(false);
+      return { success: true, message: `${cryptoPair} force refreshed` };
+    } catch (e: any) {
+      addRestLog(`Force refresh failed: ${e.message}`);
+      setIsLoading(false);
+      return { success: false, message: `Force refresh failed: ${e.message}` };
+    }
+  }, [addRestLog, feeAndSpreadPercent, fiatCurrency, investmentAmount, paperTrading.demoBalance, symbol, cryptoPair]);
+
   return {
     // State
     fiveMinuteCandles, fifteenMinuteCandles, selectedChartCandles,
@@ -790,7 +855,7 @@ export function useMarketViewModel() {
     applyLiveFeed, connectLiveFeed, disconnectLiveFeed,
     setDemoBalance,
     buyPaperTrade, sellPaperTrade, sellPartialPaperTrade,
-    start, refreshAll, refreshChart,
+    start, refreshAll, refreshChart, forceRefresh,
   };
 }
 
