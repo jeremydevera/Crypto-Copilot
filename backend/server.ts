@@ -32,11 +32,13 @@ app.get('/', (_req, res) => {
     status: 'Crypto Copilot backend running',
     version: '1.0.0',
     endpoints: [
-      'GET /api/signal/:symbol?mode=normal|pro',
+      'GET /api/signal/:symbol?mode=normal|pro (full refresh)',
+      'GET /api/cached-signal/:symbol (cached, no refresh)',
       'GET /api/candles/:symbol?interval=5m|15m|1h|4h',
       'GET /api/price/:symbol',
+      'GET /api/exchange-rates',
       'GET /api/status',
-      'WS  /ws — live price stream',
+      'WS  /ws — live price + kline stream',
     ],
   });
 });
@@ -159,8 +161,10 @@ app.get('/api/candles/:symbol', async (req, res) => {
 app.get('/api/cached-signal/:symbol', (req, res) => {
   const symbol = (req.params.symbol || 'BTCUSDT').toUpperCase();
   const signal = getCachedSignal(symbol);
+  const cachedData = getCachedData(symbol);
   res.json({
     ...signal,
+    microstructure: cachedData.microstructure,
     timestamp: Date.now(),
   });
 });

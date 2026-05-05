@@ -32,6 +32,11 @@ export async function fetchBackendSignal(
   return fetchJson<TradingSignal>(`/api/signal/${symbol}?${params.toString()}`);
 }
 
+/** Fetch cached signal — no Binance API call, just returns latest calculated signal */
+export async function fetchCachedSignal(symbol: string): Promise<TradingSignal> {
+  return fetchJson<TradingSignal>(`/api/cached-signal/${symbol}`);
+}
+
 export async function fetchCandles(
   symbol: string,
   timeframe: string,
@@ -56,12 +61,12 @@ export async function fetchCandles(
 }
 
 export async function fetchBookTicker(symbol: string): Promise<BookTicker | null> {
-  const signal = await fetchBackendSignal(symbol);
+  const signal = await fetchCachedSignal(symbol);
   return (signal as TradingSignal & { microstructure?: MarketMicrostructure }).microstructure?.bookTicker ?? null;
 }
 
 export async function fetchDepth(symbol: string, _limit: number = 10): Promise<OrderBookSnapshot | null> {
-  const signal = await fetchBackendSignal(symbol);
+  const signal = await fetchCachedSignal(symbol);
   return (signal as TradingSignal & { microstructure?: MarketMicrostructure }).microstructure?.orderBook ?? null;
 }
 
