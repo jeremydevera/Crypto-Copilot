@@ -50,6 +50,7 @@ export default function HomeTab({ vm }: HomeTabProps) {
   const { showToast } = useToast();
 
   const handleRefresh = async () => {
+    vm.refreshChart();
     const result = await vm.refreshAll();
     if (result?.success) {
       showToast(result.message, 'success');

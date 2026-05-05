@@ -232,8 +232,8 @@ export default function ChartTab({ vm }: ChartTabProps) {
     chartRef.current?.applyOptions({
       timeScale: {
         timeVisible: true,
-        secondsVisible: vm.selectedChartTimeframe === '1s',
-        barSpacing: vm.selectedChartTimeframe === '1s' ? 6 : 9,
+        secondsVisible: false,
+        barSpacing: 9,
       },
     });
   }, [vm.selectedChartTimeframe]);
@@ -333,12 +333,20 @@ export default function ChartTab({ vm }: ChartTabProps) {
 
           <div className="relative">
             <div ref={containerRef} className="h-[560px] w-full" />
-            {!hasData && (
+            {vm.chartLoading && (
+              <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-[#0f1318]/95 text-center">
+                <div className="h-10 w-10 animate-spin rounded-full border-4 border-[#f0b90b] border-t-transparent" />
+                <p className="mt-4 text-sm font-medium text-gray-300">Loading chart history...</p>
+                <p className="mt-1 text-xs text-[#848e9c]">Fetching {vm.selectedChartTimeframe} candles for {vm.cryptoPair}</p>
+              </div>
+            )}
+            {!vm.chartLoading && !hasData && (
               <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-[#0f1318]/90 text-center">
                 <p className="text-base font-medium text-gray-300">No candle data available</p>
                 <p className="mt-2 text-sm text-[#848e9c]">Binance history may be unavailable from this network.</p>
                 <button
                   onClick={async () => {
+                    vm.refreshChart();
                     const result = await vm.refreshAll();
                     if (result?.success) {
                       showToast(result.message, 'success');

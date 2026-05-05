@@ -15,7 +15,7 @@ import {
   getCachedSymbols,
   refreshCandlesForInterval,
 } from './services/Cache.js';
-import { connectSymbol, startAutoConnect, getLivePrice } from './services/BinanceWebSocket.js';
+import { connectSymbol, startAutoConnect, getLivePrice, subscribeKline } from './services/BinanceWebSocket.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -72,7 +72,7 @@ app.get('/api/signal/:symbol', async (req, res) => {
   const positionRiskPercent = parseFloat(req.query.riskPercent as string) || 1;
 
   try {
-    // Refresh candles and calculate signal
+    // Use cached data if fresh, otherwise full refresh
     const signal = await fullRefresh(symbol, {
       feeAndSpreadPercent,
       investmentAmount,
@@ -118,11 +118,21 @@ app.get('/api/candles/:symbol', async (req, res) => {
 
   try {
     let candles = getCachedCandles(symbol, interval);
-    if (candles.length === 0 || interval === '1m' || interval === '1d') {
+    const data = getCachedData(symbol);
+    const cacheAge = Date.now() - data.lastUpdated;
+    const isCacheFresh = candles.length > 0 && cacheAge < 30_000;
+
+    if (isCacheFresh) {
+      // Use cached candles — no Binance API call needed
+      console.log(`[Candles] Returning cached ${interval} candles for ${symbol} (age: ${Math.round(cacheAge / 1000)}s)`);
+    } else if (candles.length === 0 || cacheAge > 60_000) {
+      // No cache or very stale — fetch from Binance
+      console.log(`[Candles] Fetching fresh ${interval} candles for ${symbol} (cache: ${candles.length}, age: ${Math.round(cacheAge / 1000)}s)`);
       candles = await refreshCandlesForInterval(symbol, interval, Math.max(limit, 200));
     } else {
-      await fullRefresh(symbol);
-      candles = getCachedCandles(symbol, interval);
+      // Cache exists but is moderately stale — use it, refresh in background
+      console.log(`[Candles] Using cached ${interval} candles for ${symbol}, refreshing in background`);
+      refreshCandlesForInterval(symbol, interval, Math.max(limit, 200)).catch(() => {});
     }
     const limitedCandles = candles.slice(-limit);
 
@@ -171,11 +181,14 @@ app.get('/api/price/:symbol', (req, res) => {
 
 const server = http.createServer(app);
 
-// WebSocket server for frontend clients — streams live price updates
+// WebSocket server for frontend clients — streams live price updates + kline data
 const wss = new WebSocketServer({ server, path: '/ws' });
 
 wss.on('connection', (ws: WebSocket) => {
   console.log('[WS] Frontend client connected');
+
+  // Track kline subscriptions for this client
+  const klineUnsubscribers: (() => void)[] = [];
 
   // Send cached prices immediately on connect
   const symbols = getCachedSymbols();
@@ -201,8 +214,40 @@ wss.on('connection', (ws: WebSocket) => {
   ws.on('message', (raw: WebSocket.Data) => {
     try {
       const msg = JSON.parse(raw.toString());
+
       if (msg.type === 'subscribe' && msg.symbol) {
         connectSymbol(msg.symbol.toUpperCase());
+      }
+
+      // Subscribe to kline updates for a specific symbol:interval
+      // Frontend sends: { type: "subscribe_kline", symbol: "BTCUSDT", interval: "15m" }
+      // Backend forwards: { type: "kline", symbol: "BTCUSDT", interval: "15m", candle: { ... } }
+      // Note: 1s is mapped to 1m on the backend (Binance doesn't support 1s klines)
+      if (msg.type === 'subscribe_kline' && msg.symbol && msg.interval) {
+        const symbol = msg.symbol.toUpperCase();
+        const interval = msg.interval;
+        console.log(`[WS] Client subscribed to kline ${symbol}:${interval}`);
+
+        const unsub = subscribeKline(symbol, interval, (candle) => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+              type: 'kline',
+              symbol,
+              interval,
+              candle,
+            }));
+          }
+        });
+        klineUnsubscribers.push(unsub);
+      }
+
+      // Unsubscribe from all kline streams (e.g., when switching timeframes)
+      if (msg.type === 'unsubscribe_kline') {
+        console.log(`[WS] Client unsubscribed from kline streams`);
+        for (const unsub of klineUnsubscribers) {
+          try { unsub(); } catch {}
+        }
+        klineUnsubscribers.length = 0;
       }
     } catch {}
   });
@@ -210,6 +255,10 @@ wss.on('connection', (ws: WebSocket) => {
   ws.on('close', () => {
     console.log('[WS] Frontend client disconnected');
     clearInterval(interval);
+    // Clean up kline subscriptions
+    for (const unsub of klineUnsubscribers) {
+      try { unsub(); } catch {}
+    }
   });
 });
 

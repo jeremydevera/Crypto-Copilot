@@ -8,7 +8,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import type { Candle, TradingSignal, TradeQuote, TradeTick, MarketMicrostructure, DataFreshness, Timeframe } from '../engine/types';
 import { placeholderSignal, connectingFreshness, emptyMicrostructure, timeframeSeconds } from '../engine/types';
 import { analyze, calculateTradeQuote, latestSwingLowPublic, nearestSwingHighAbovePricePublic, defaultSlippagePercent } from '../engine/SignalEngine';
-import { BinanceKlineWebSocket } from '../services/BinanceMarketService';
+import { BackendKlineWebSocket } from '../services/BackendWebSocket';
 import { fetchBackendSignal, fetchCandles } from '../services/BackendMarketService';
 import { connectBackendWebSocket, disconnectBackendWebSocket, subscribeToPrices, sendSubscribe, type LivePriceUpdate } from '../services/BackendWebSocket';
 import { PaperTradingStore } from './PaperTradingStore';
@@ -38,12 +38,14 @@ export function useMarketViewModel() {
   });
   const [statusMessage, setStatusMessage] = useState('Starting ultra-fast WebSockets...');
   const [isLoading, setIsLoading] = useState(false);
+  const [chartLoading, setChartLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
   const [dataFreshness, setDataFreshness] = useState<DataFreshness>(connectingFreshness);
   const [microstructure, setMicrostructure] = useState<MarketMicrostructure>(emptyMicrostructure);
   const [devLogs, setDevLogs] = useState<string[]>([]);
   const [restLogs, setRestLogs] = useState<string[]>([]);
-  const [selectedChartTimeframe, setSelectedChartTimeframe] = useState<Timeframe>('1d');
+  const [selectedChartTimeframe, setSelectedChartTimeframe] = useState<Timeframe>('15m');
+  const [chartRefreshTrigger, setChartRefreshTrigger] = useState(0);
   const [investmentAmount, setInvestmentAmount] = useState(10000);
   const [feeAndSpreadPercent] = useState(0.5);
   const [autoTradeEnabled, setAutoTradeEnabled] = useState(true);
@@ -59,7 +61,7 @@ export function useMarketViewModel() {
   const sellSoundRef = useRef<SoundId>('emergency');
   useEffect(() => { buySoundRef.current = buySound; }, [buySound]);
   useEffect(() => { sellSoundRef.current = sellSound; }, [sellSound]);
-  const selectedChartTimeframeRef = useRef<Timeframe>('1d');
+  const selectedChartTimeframeRef = useRef<Timeframe>('15m');
 
   // Derived Binance symbol from cryptoPair
   const symbol = pairToSymbol(cryptoPair);
@@ -69,11 +71,16 @@ export function useMarketViewModel() {
   const paperTrading = paperTradingRef.current;
   const [ptVersion, setPtVersion] = useState(0); // trigger re-renders
 
-  const klineWsRef = useRef(new BinanceKlineWebSocket());
-  const chartWsRef = useRef(new BinanceKlineWebSocket());
+  const klineWsRef = useRef(new BackendKlineWebSocket());
+  const chartWsRef = useRef(new BackendKlineWebSocket());
   const liveFeedWsRef = useRef<WebSocket | null>(null);
   const liveFeedMsgCountRef = useRef(0);
   const backendWsConnectedRef = useRef(false);
+  const livePriceRef = useRef(0);
+  const chartHistoryReadyRef = useRef(false);
+  const chartLoadRequestIdRef = useRef(0);
+  const currentSymbolRef = useRef(symbol);
+  currentSymbolRef.current = symbol;
 
   const lastSignalCalcTime = useRef(0);
   const lastLogTime = useRef(0);
@@ -143,6 +150,9 @@ export function useMarketViewModel() {
     const ts = new Date().toLocaleTimeString();
     setRestLogs(prev => [`[${ts}] ${msg}`, ...prev].slice(0, 2000));
   }, []);
+
+  const clearDevLogs = useCallback(() => setDevLogs([]), []);
+  const clearRestLogs = useCallback(() => setRestLogs([]), []);
 
   const recalculateSignal = useCallback((
     fmc: Candle[], fmc15: Candle[], fmc1h: Candle[], fmc4h: Candle[], invAmt: number, feePct: number, pt: PaperTradingStore, ms: MarketMicrostructure
@@ -338,8 +348,11 @@ export function useMarketViewModel() {
         feeAndSpreadPercent,
       });
 
-      setSignal(latestSignal);
-      setActiveSignal(latestSignal);
+      // Preserve live price if we already have one (backend signal price can be stale)
+      const livePrice = livePriceRef.current > 0 ? livePriceRef.current : latestSignal.price;
+      const mergedSignal = { ...latestSignal, price: livePrice };
+      setSignal(mergedSignal);
+      setActiveSignal(mergedSignal);
       setLastUpdated(Date.now());
 
       const qSwingLow = latestSwingLowPublic(fiveMinuteCandles);
@@ -381,15 +394,29 @@ export function useMarketViewModel() {
       price,
       entryPrice: prev.entryPrice > 0 ? prev.entryPrice : price,
     }));
+
+    // Track live price in ref for refreshAll to use
+    livePriceRef.current = price;
   }, [symbol]);
 
   const updateSelectedChartPrice = useCallback((price: number, quantity: number = 0, time: number = Date.now()) => {
     if (!Number.isFinite(price) || price <= 0) return;
+    if (!chartHistoryReadyRef.current) return;
 
-    const intervalMs = timeframeSeconds(selectedChartTimeframeRef.current) * 1000;
-    const openTime = Math.floor(time / intervalMs) * intervalMs;
-
+    // Ignore prices that are wildly different from the current chart data
+    // (e.g., BTC price coming in after switching to SOL)
     setSelectedChartCandles(prev => {
+      if (prev.length > 0) {
+        const lastClose = prev[prev.length - 1].close;
+        // If the price is more than 10x or less than 0.1x the last close, ignore it
+        if (lastClose > 0 && (price > lastClose * 10 || price < lastClose * 0.1)) {
+          return prev;
+        }
+      }
+
+      const intervalMs = timeframeSeconds(selectedChartTimeframeRef.current) * 1000;
+      const openTime = Math.floor(time / intervalMs) * intervalMs;
+
       const updated = [...prev];
       const idx = updated.findIndex(c => c.openTime === openTime);
 
@@ -540,13 +567,16 @@ export function useMarketViewModel() {
     setStatusMessage(`Syncing ${cryptoPair} history...`);
     addRestLog('Initiating backend API fetch...');
 
+    // Reconnect live feed on refresh (idempotent — closes existing connection first)
+    connectLiveFeed(selectedLiveFeedId);
+
     try {
-      const [new5m, new15m, new1h, new4h, newChart, latestSignal] = await Promise.all([
+      addRestLog(`Fetching ${symbol} candles (5m,15m,1h,4h) + signal...`);
+      const [new5m, new15m, new1h, new4h, latestSignal] = await Promise.all([
         fetchCandles(symbol, '5m', 300),
         fetchCandles(symbol, '15m', 200),
         fetchCandles(symbol, '1h', 200),
         fetchCandles(symbol, '4h', 200),
-        fetchCandles(symbol, selectedChartTimeframe, 500),
         fetchBackendSignal(symbol, {
           mode: 'pro',
           investmentAmount: fiatCurrency === 'USD' ? investmentAmount : investmentAmount / getExchangeRate(),
@@ -556,13 +586,17 @@ export function useMarketViewModel() {
         }),
       ]);
 
+      addRestLog(`Candles received: 5m=${new5m.length}, 15m=${new15m.length}, 1h=${new1h.length}, 4h=${new4h.length}`);
       setFiveMinuteCandles(new5m);
       setFifteenMinuteCandles(new15m);
       setOneHourCandles(new1h);
       setFourHourCandles(new4h);
-      if (newChart.length > 0) setSelectedChartCandles(normalizeCandles(newChart, 500));
-      setSignal(latestSignal);
-      setActiveSignal(latestSignal);
+
+      // Preserve live price if we already have one (backend signal price can be stale)
+      const livePrice = livePriceRef.current > 0 ? livePriceRef.current : latestSignal.price;
+      const mergedSignal = { ...latestSignal, price: livePrice };
+      setSignal(mergedSignal);
+      setActiveSignal(mergedSignal);
 
       await refreshMicrostructure(true);
       const wsStatus = backendWsConnectedRef.current ? 'Live price connected' : 'Live price pending';
@@ -580,6 +614,7 @@ export function useMarketViewModel() {
   };
 
   const start = useCallback(() => {
+    addLog(`[Start] Initializing ${symbol} — connecting WS and fetching data...`);
     // Connect to backend WebSocket for live price updates
     connectBackendWebSocket();
     sendSubscribe(symbol);
@@ -620,9 +655,12 @@ export function useMarketViewModel() {
       (msg) => addLog(`Signal WSS Error: ${msg}`),
     );
 
+    // Connect live price feed (Binance Futures BookTicker by default)
+    connectLiveFeed(selectedLiveFeedId);
+
     refreshAll();
     return unsubscribe;
-  }, [applyLivePriceToSignals, handleLiveTrade, updateSelectedChartPrice, addLog, symbol]);
+  }, [applyLivePriceToSignals, handleLiveTrade, updateSelectedChartPrice, addLog, symbol, connectLiveFeed, selectedLiveFeedId]);
 
   // Fetch exchange rates from CoinGecko (free, no API key needed)
   useEffect(() => {
@@ -653,7 +691,7 @@ export function useMarketViewModel() {
 
   useEffect(() => {
     refreshBackendSignal();
-    const interval = setInterval(refreshBackendSignal, 15_000);
+    const interval = setInterval(refreshBackendSignal, 30_000);
     return () => clearInterval(interval);
   }, [refreshBackendSignal]);
 
@@ -663,6 +701,7 @@ export function useMarketViewModel() {
       disconnectBackendWebSocket();
       klineWsRef.current.disconnect();
       chartWsRef.current.disconnect();
+      disconnectLiveFeed();
       if (typeof unsubscribe === 'function') unsubscribe();
     };
   }, []);
@@ -670,13 +709,17 @@ export function useMarketViewModel() {
   // Reconnect everything when crypto pair changes
   useEffect(() => {
     // Clear all candle data for the new pair
+    addLog(`[Pair] Clearing all candle data for ${cryptoPair}`);
     setFiveMinuteCandles([]);
     setFifteenMinuteCandles([]);
     setOneHourCandles([]);
     setFourHourCandles([]);
     setSelectedChartCandles([]);
+    setChartLoading(true);
+    chartHistoryReadyRef.current = false;
     setSignal(placeholderSignal);
     setActiveSignal(placeholderSignal);
+    livePriceRef.current = 0;
 
     // Subscribe backend WebSocket to new symbol
     sendSubscribe(symbol);
@@ -703,7 +746,11 @@ export function useMarketViewModel() {
       (msg) => addLog(`Signal WSS Error: ${msg}`),
     );
 
+    // Reconnect live price feed for new pair
+    connectLiveFeed(selectedLiveFeedId);
+
     // Fetch candles for new pair
+    addLog(`[Pair] Switched to ${cryptoPair}, fetching all data...`);
     refreshAll();
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -711,12 +758,17 @@ export function useMarketViewModel() {
 
   // Reconnect chart WebSocket when timeframe changes
   useEffect(() => {
+    addRestLog(`[Chart] Timeframe changed to ${selectedChartTimeframe}, clearing chart and reconnecting...`);
+    const chartRequestId = ++chartLoadRequestIdRef.current;
+    chartHistoryReadyRef.current = false;
     setSelectedChartCandles([]);
+    setChartLoading(true);
     chartWsRef.current.disconnect();
     chartWsRef.current.connect(
       symbol,
       selectedChartTimeframe,
       (candle) => {
+        if (!chartHistoryReadyRef.current) return;
         setLastUpdated(Date.now());
         setSelectedChartCandles(prev => {
           const idx = prev.findIndex(c => c.openTime === candle.openTime);
@@ -726,22 +778,72 @@ export function useMarketViewModel() {
             updated[idx] = candle;
           } else {
             updated = [...prev, candle];
+            if (prev.length === 0) {
+              addRestLog(`[Chart WS] First ${selectedChartTimeframe} candle received (history may still be loading)`);
+            }
           }
           return normalizeCandles(updated, 500);
         });
       },
-      (msg) => addLog(`Chart WSS Error: ${msg}`),
+      (msg) => addRestLog(`[Chart WS] ${msg}`),
     );
 
     // Also fetch initial chart data for the new timeframe
-    fetchCandles(symbol, selectedChartTimeframe, 500).then(newChart => {
-      if (newChart.length > 0) setSelectedChartCandles(normalizeCandles(newChart, 500));
-    }).catch(() => {});
+    addRestLog(`[Chart] Fetching ${selectedChartTimeframe} candles for ${symbol}...`);
+    fetchCandles(symbol, selectedChartTimeframe, 500).then(async (newChart) => {
+      if (chartRequestId !== chartLoadRequestIdRef.current) return;
+      addRestLog(`[Chart] Received ${newChart.length} ${selectedChartTimeframe} candles for ${symbol}`);
+      if (newChart.length > 0) {
+        chartHistoryReadyRef.current = true;
+        setSelectedChartCandles(normalizeCandles(newChart, 500));
+        setChartLoading(false);
+        addRestLog(`[Chart] ✅ Chart set with ${newChart.length} candles`);
+      } else {
+        addRestLog(`[Chart] ⚠️ No candles for ${symbol} ${selectedChartTimeframe}, trying 15m fallback`);
+        // Fallback to 15m if the selected timeframe has no data
+        const fallback = await fetchCandles(symbol, '15m', 500);
+        addRestLog(`[Chart] Fallback 15m returned ${fallback.length} candles`);
+        if (chartRequestId !== chartLoadRequestIdRef.current) return;
+        if (fallback.length > 0) {
+          chartHistoryReadyRef.current = true;
+          setSelectedChartCandles(normalizeCandles(fallback, 500));
+          setChartLoading(false);
+          addRestLog(`[Chart] ✅ Chart set with ${fallback.length} fallback candles`);
+        } else {
+          chartHistoryReadyRef.current = false;
+          setChartLoading(false);
+          addRestLog(`[Chart] ❌ Both primary and fallback candle fetches returned empty`);
+        }
+      }
+    }).catch(async (err) => {
+      console.error('Chart candle fetch failed:', err);
+      addRestLog(`[Chart] ❌ Fetch failed: ${err.message}`);
+      // Fallback to 15m on error
+      try {
+        const fallback = await fetchCandles(symbol, '15m', 500);
+        if (chartRequestId !== chartLoadRequestIdRef.current) return;
+        addRestLog(`[Chart] Error fallback 15m returned ${fallback.length} candles`);
+        if (fallback.length > 0) {
+          chartHistoryReadyRef.current = true;
+          setSelectedChartCandles(normalizeCandles(fallback, 500));
+          setChartLoading(false);
+          addRestLog(`[Chart] ✅ Chart set with ${fallback.length} fallback candles`);
+        } else {
+          chartHistoryReadyRef.current = false;
+          setChartLoading(false);
+        }
+      } catch (fallbackErr: any) {
+        if (chartRequestId !== chartLoadRequestIdRef.current) return;
+        chartHistoryReadyRef.current = false;
+        setChartLoading(false);
+        addRestLog(`[Chart] ❌ Fallback also failed: ${fallbackErr.message}`);
+      }
+    });
 
     return () => {
       chartWsRef.current.disconnect();
     };
-  }, [selectedChartTimeframe, symbol, addLog]);
+  }, [selectedChartTimeframe, symbol, chartRefreshTrigger, addLog]);
 
   // Paper trading helpers
   const buyPaperTrade = useCallback((): string | null => {
@@ -780,12 +882,16 @@ export function useMarketViewModel() {
     setPtVersion(v => v + 1);
   }, [paperTrading]);
 
+  const refreshChart = useCallback(() => {
+    setChartRefreshTrigger(v => v + 1);
+  }, []);
+
   return {
     // State
     fiveMinuteCandles, fifteenMinuteCandles, selectedChartCandles,
     signal, activeSignal, tradeQuote,
-    statusMessage, isLoading, lastUpdated, dataFreshness,
-    microstructure, devLogs, restLogs,
+    statusMessage, isLoading, chartLoading, lastUpdated, dataFreshness,
+    microstructure, devLogs, restLogs, clearDevLogs, clearRestLogs,
     selectedChartTimeframe, investmentAmount, feeAndSpreadPercent,
     autoTradeEnabled, cryptoPair, fiatCurrency,
     buySound, sellSound,
@@ -801,7 +907,7 @@ export function useMarketViewModel() {
     applyLiveFeed, connectLiveFeed, disconnectLiveFeed,
     setDemoBalance,
     buyPaperTrade, sellPaperTrade, sellPartialPaperTrade,
-    start, refreshAll,
+    start, refreshAll, refreshChart,
   };
 }
 

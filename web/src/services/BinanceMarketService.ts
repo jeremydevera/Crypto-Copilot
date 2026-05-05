@@ -12,8 +12,7 @@ const REST_BASE_URLS = [
 ];
 
 const WSS_BASE_URLS = [
-  'wss://stream.binance.com:9443',
-  'wss://stream1.binance.com:443',
+  'wss://fstream.binance.com',
   'wss://stream.binance.us:9443',
 ];
 
@@ -132,6 +131,8 @@ export class BinanceKlineWebSocket {
   private healthInterval: ReturnType<typeof setInterval> | null = null;
   private lastMessageTime = 0;
   private urlIndex = 0;
+  private reconnectAttempts = 0;
+  private maxReconnectAttempts = 3;
   private symbol = '';
   private timeframe = '5m';
   private onCandle: (candle: Candle) => void = () => {};
@@ -145,6 +146,7 @@ export class BinanceKlineWebSocket {
     this.onCandle = onCandle;
     this.onError = onError;
     this.urlIndex = 0;
+    this.reconnectAttempts = 0;
     this.isDisconnected = false;
     this.connectToCurrentURL();
     this.startPing();
@@ -152,11 +154,15 @@ export class BinanceKlineWebSocket {
 
   private connectToCurrentURL() {
     const stream = `${this.symbol.toLowerCase()}@kline_${this.timeframe}`;
-    const baseURL = WSS_BASE_URLS[this.urlIndex];
+    const baseURL = WSS_BASE_URLS[this.urlIndex % WSS_BASE_URLS.length];
     const url = `${baseURL}/ws/${stream}`;
 
     this.ws = new WebSocket(url);
     this.lastMessageTime = Date.now();
+
+    this.ws.onopen = () => {
+      this.reconnectAttempts = 0;
+    };
 
     this.ws.onmessage = (event) => {
       this.lastMessageTime = Date.now();
@@ -171,7 +177,7 @@ export class BinanceKlineWebSocket {
             low: parseFloat(k.l),
             close: parseFloat(k.c),
             volume: parseFloat(k.v),
-            isClosed: !!k.x, // Binance k.x = true when candle is closed
+            isClosed: !!k.x,
           });
         }
       } catch {}
@@ -217,14 +223,19 @@ export class BinanceKlineWebSocket {
     }, 10000);
   }
 
-  private handleDisconnect(reason: string) {
-    this.onError(`Connection lost: ${reason}. Reconnecting...`);
+  private handleDisconnect(_reason: string) {
+    this.reconnectAttempts++;
+    if (this.reconnectAttempts > this.maxReconnectAttempts) {
+      this.onError(`Chart WebSocket unavailable (using REST data instead)`);
+      return;
+    }
     this.urlIndex++;
     if (this.urlIndex < WSS_BASE_URLS.length) {
       this.connectToCurrentURL();
     } else {
       this.urlIndex = 0;
-      setTimeout(() => this.connectToCurrentURL(), 2000);
+      const delay = Math.min(2000 * this.reconnectAttempts, 10000);
+      setTimeout(() => this.connectToCurrentURL(), delay);
     }
   }
 }

@@ -5,24 +5,40 @@ export default function DevTerminalTab({ vm }: DevTerminalTabProps) {
     <div className="p-6 space-y-5 max-w-5xl mx-auto">
       <h1 className="text-xl font-bold">💻 Dev Terminal</h1>
 
-      <div className="grid grid-cols-2 gap-5">
-        {/* Live Socket Logs */}
+      <div className="grid grid-cols-1 gap-5">
+        {/* REST API Logs (includes chart logs) */}
         <div className="bg-gray-900 rounded-xl p-5 space-y-3">
-          <h2 className="text-sm font-bold text-gray-400 uppercase tracking-wider">Live Socket Logs</h2>
-          <div className="h-80 overflow-y-auto bg-black rounded-lg p-3 font-mono text-xs text-green-400">
-            {vm.devLogs.length === 0 && <p className="text-gray-600">Waiting for data...</p>}
-            {vm.devLogs.map((log: string, i: number) => (
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-bold text-gray-400 uppercase tracking-wider">REST API & Chart Logs</h2>
+            <button
+              onClick={() => vm.clearRestLogs()}
+              className="rounded bg-gray-700 px-2 py-1 text-xs font-medium text-gray-300 hover:bg-gray-600"
+            >
+              Clear
+            </button>
+          </div>
+          <div className="h-64 overflow-y-auto bg-black rounded-lg p-3 font-mono text-xs text-blue-400">
+            {vm.restLogs.length === 0 && <p className="text-gray-600">No REST logs yet</p>}
+            {vm.restLogs.slice(0, 500).map((log: string, i: number) => (
               <p key={i} className="whitespace-nowrap">{log}</p>
             ))}
           </div>
         </div>
 
-        {/* REST API Logs */}
+        {/* Live Socket Logs */}
         <div className="bg-gray-900 rounded-xl p-5 space-y-3">
-          <h2 className="text-sm font-bold text-gray-400 uppercase tracking-wider">REST API Logs</h2>
-          <div className="h-80 overflow-y-auto bg-black rounded-lg p-3 font-mono text-xs text-blue-400">
-            {vm.restLogs.length === 0 && <p className="text-gray-600">No REST logs yet</p>}
-            {vm.restLogs.slice(0, 200).map((log: string, i: number) => (
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-bold text-gray-400 uppercase tracking-wider">Live Socket Logs</h2>
+            <button
+              onClick={() => vm.clearDevLogs()}
+              className="rounded bg-gray-700 px-2 py-1 text-xs font-medium text-gray-300 hover:bg-gray-600"
+            >
+              Clear
+            </button>
+          </div>
+          <div className="h-64 overflow-y-auto bg-black rounded-lg p-3 font-mono text-xs text-green-400">
+            {vm.devLogs.length === 0 && <p className="text-gray-600">Waiting for data...</p>}
+            {vm.devLogs.map((log: string, i: number) => (
               <p key={i} className="whitespace-nowrap">{log}</p>
             ))}
           </div>

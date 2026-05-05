@@ -2,13 +2,13 @@
 // Market Models — Ported from MarketModels.swift
 // ============================================================
 
-export type Timeframe = '1s' | '1m' | '5m' | '15m' | '1h' | '4h' | '1d';
+export type Timeframe = '1m' | '5m' | '15m' | '1h' | '4h' | '1d';
 
-export const TIMEFRAMES: Timeframe[] = ['1s', '1m', '5m', '15m', '1h', '4h', '1d'];
+export const TIMEFRAMES: Timeframe[] = ['1m', '5m', '15m', '1h', '4h', '1d'];
 
 export function timeframeTitle(tf: Timeframe): string {
   const map: Record<Timeframe, string> = {
-    '1s': '1s', '1m': '1m', '5m': '5m', '15m': '15m',
+    '1m': '1m', '5m': '5m', '15m': '15m',
     '1h': '1h', '4h': '4H', '1d': '1D',
   };
   return map[tf];
@@ -16,7 +16,7 @@ export function timeframeTitle(tf: Timeframe): string {
 
 export function timeframeSeconds(tf: Timeframe): number {
   const map: Record<Timeframe, number> = {
-    '1s': 1, '1m': 60, '5m': 300, '15m': 900,
+    '1m': 60, '5m': 300, '15m': 900,
     '1h': 3600, '4h': 14400, '1d': 86400,
   };
   return map[tf];

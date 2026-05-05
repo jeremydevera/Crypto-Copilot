@@ -41,8 +41,18 @@ export async function fetchCandles(
     interval: timeframe,
     limit: String(limit),
   });
-  const data = await fetchJson<{ candles: Candle[] }>(`/api/candles/${symbol}?${params.toString()}`);
-  return data.candles;
+  const url = `/api/candles/${symbol}?${params.toString()}`;
+  const startTime = Date.now();
+  try {
+    const data = await fetchJson<{ candles: Candle[] }>(url);
+    const elapsed = Date.now() - startTime;
+    console.log(`[fetchCandles] ${symbol} ${timeframe} → ${data.candles.length} candles in ${elapsed}ms`);
+    return data.candles;
+  } catch (err: any) {
+    const elapsed = Date.now() - startTime;
+    console.error(`[fetchCandles] ${symbol} ${timeframe} FAILED after ${elapsed}ms: ${err.message}`);
+    throw err;
+  }
 }
 
 export async function fetchBookTicker(symbol: string): Promise<BookTicker | null> {

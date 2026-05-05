@@ -21,7 +21,7 @@ const cache = new Map<string, CachedData>();
 export function getOrCreate(symbol: string): CachedData {
   if (!cache.has(symbol)) {
     cache.set(symbol, {
-      candles: { '5m': [], '15m': [], '1h': [], '4h': [] },
+      candles: { '1m': [], '5m': [], '15m': [], '1h': [], '4h': [], '1d': [] },
       signal: { ...placeholderSignal, symbol },
       microstructure: { ...emptyMicrostructure },
       lastUpdated: 0,
@@ -36,17 +36,21 @@ export function getOrCreate(symbol: string): CachedData {
 export async function refreshCandles(symbol: string): Promise<CachedData> {
   const data = getOrCreate(symbol);
 
-  const [candles5m, candles15m, candles1h, candles4h] = await Promise.all([
+  const [candles1m, candles5m, candles15m, candles1h, candles4h, candles1d] = await Promise.all([
+    fetchCandles(symbol, '1m', 300),
     fetchCandles(symbol, '5m', 300),
     fetchCandles(symbol, '15m', 200),
     fetchCandles(symbol, '1h', 200),
     fetchCandles(symbol, '4h', 200),
+    fetchCandles(symbol, '1d', 200),
   ]);
 
+  data.candles['1m'] = candles1m;
   data.candles['5m'] = candles5m;
   data.candles['15m'] = candles15m;
   data.candles['1h'] = candles1h;
   data.candles['4h'] = candles4h;
+  data.candles['1d'] = candles1d;
 
   return data;
 }
@@ -145,6 +149,9 @@ export function getCachedSymbols(): string[] {
 
 // ── Full refresh: fetch candles + microstructure + calculate ─
 
+// How long before we consider cached data stale (milliseconds)
+const CACHE_TTL = 30_000; // 30 seconds
+
 export async function fullRefresh(
   symbol: string,
   options: {
@@ -156,8 +163,18 @@ export async function fullRefresh(
     positionRiskPercent?: number;
   } = {},
 ): Promise<TradingSignal> {
-  await refreshCandles(symbol);
-  await refreshMicrostructure(symbol);
+  const data = getOrCreate(symbol);
+  const now = Date.now();
+  const isStale = now - data.lastUpdated > CACHE_TTL;
+
+  if (isStale) {
+    // Cache is stale — fetch fresh data
+    console.log(`[Cache] Refreshing stale data for ${symbol} (age: ${Math.round((now - data.lastUpdated) / 1000)}s)`);
+    await refreshCandles(symbol);
+    await refreshMicrostructure(symbol);
+  }
+  // Skip "Using cached data" log — too noisy at 2s intervals
+
   return calculateSignal(
     symbol,
     options.feeAndSpreadPercent,
