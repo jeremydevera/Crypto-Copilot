@@ -3,7 +3,7 @@
 // Express server with REST + WebSocket endpoints
 // ============================================================
 
-import express from 'express';
+import express, { type Request, type Response } from 'express';
 import cors from 'cors';
 import http from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -18,7 +18,7 @@ import {
 import { connectSymbol, startAutoConnect, getLivePrice, subscribeKline, subscribePrice } from './services/BinanceWebSocket.js';
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = Number(process.env.PORT) || 3001;
 
 // ── Middleware ────────────────────────────────────────────────
 
@@ -26,13 +26,16 @@ const PORT = process.env.PORT || 3001;
 const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',').map(o => o.trim()) ?? [];
 
 app.use(cors({
-  origin: (origin, callback) => {
+  origin: (
+    origin: string | undefined,
+    callback: (err: Error | null, allow?: boolean) => void
+  ) => {
     // Allow requests with no origin (mobile apps, curl, Postman)
     // or if ALLOWED_ORIGINS is not set (dev mode — allow all)
     if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
-      callback(new Error(`Origin not allowed by CORS: ${origin}`));
+      callback(new Error(`Origin not allowed by CORS: ${origin}`), false);
     }
   },
   credentials: true,
@@ -41,7 +44,7 @@ app.use(express.json());
 
 // ── Health Check ─────────────────────────────────────────────
 
-app.get('/', (_req, res) => {
+app.get('/', (_req: Request, res: Response) => {
   res.json({
     status: 'Crypto Copilot backend running',
     version: '1.0.0',
@@ -57,7 +60,7 @@ app.get('/', (_req, res) => {
   });
 });
 
-app.get('/api/status', (_req, res) => {
+app.get('/api/status', (_req: Request, res: Response) => {
   const symbols = getCachedSymbols();
   res.json({
     status: 'ok',
@@ -79,8 +82,8 @@ app.get('/api/status', (_req, res) => {
 
 // ── Signal Endpoint ───────────────────────────────────────────
 
-app.get('/api/signal/:symbol', async (req, res) => {
-  const symbol = (req.params.symbol || 'BTCUSDT').toUpperCase();
+app.get('/api/signal/:symbol', async (req: Request, res: Response) => {
+  const symbol = (String(req.params.symbol) || 'BTCUSDT').toUpperCase();
   const mode = (req.query.mode as string) || 'pro';
   const feeAndSpreadPercent = parseFloat(req.query.feeAndSpread as string) || 0.5;
   const investmentAmount = parseFloat(req.query.investment as string) || 100000;
@@ -118,8 +121,8 @@ app.get('/api/signal/:symbol', async (req, res) => {
 
 // ── Candles Endpoint ─────────────────────────────────────────
 
-app.get('/api/candles/:symbol', async (req, res) => {
-  const symbol = (req.params.symbol || 'BTCUSDT').toUpperCase();
+app.get('/api/candles/:symbol', async (req: Request, res: Response) => {
+  const symbol = (String(req.params.symbol) || 'BTCUSDT').toUpperCase();
   const interval = (req.query.interval as string) || '15m';
   const limit = parseInt(req.query.limit as string) || 200;
 
@@ -172,8 +175,8 @@ app.get('/api/candles/:symbol', async (req, res) => {
 
 // ── Cached Signal (no refresh, just return latest) ───────────
 
-app.get('/api/cached-signal/:symbol', (req, res) => {
-  const symbol = (req.params.symbol || 'BTCUSDT').toUpperCase();
+app.get('/api/cached-signal/:symbol', (req: Request, res: Response) => {
+  const symbol = (String(req.params.symbol) || 'BTCUSDT').toUpperCase();
   const signal = getCachedSignal(symbol);
   const cachedData = getCachedData(symbol);
   const now = Date.now();
@@ -190,8 +193,8 @@ app.get('/api/cached-signal/:symbol', (req, res) => {
 
 // ── Live Price Endpoint ──────────────────────────────────────
 
-app.get('/api/price/:symbol', (req, res) => {
-  const symbol = (req.params.symbol || 'BTCUSDT').toUpperCase();
+app.get('/api/price/:symbol', (req: Request, res: Response) => {
+  const symbol = (String(req.params.symbol) || 'BTCUSDT').toUpperCase();
   const live = getLivePrice(symbol);
   if (!live) {
     res.status(404).json({ error: 'No live price data for symbol', symbol });
@@ -202,7 +205,7 @@ app.get('/api/price/:symbol', (req, res) => {
 
 // ── Exchange Rates Endpoint ──────────────────────────────────
 
-app.get('/api/exchange-rates', async (_req, res) => {
+app.get('/api/exchange-rates', async (_req: Request, res: Response) => {
   try {
     const cgRes = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd,php,eur,gbp,jpy,krw,inr,aud,cad,sgd');
     if (!cgRes.ok) {
