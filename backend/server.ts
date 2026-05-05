@@ -15,7 +15,7 @@ import {
   getCachedSymbols,
   refreshCandlesForInterval,
 } from './services/Cache.js';
-import { connectSymbol, startAutoConnect, getLivePrice, subscribeKline } from './services/BinanceWebSocket.js';
+import { connectSymbol, startAutoConnect, getLivePrice, subscribeKline, subscribePrice } from './services/BinanceWebSocket.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -226,6 +226,8 @@ wss.on('connection', (ws: WebSocket) => {
 
   // Track kline subscriptions for this client
   const klineUnsubscribers: (() => void)[] = [];
+  const priceUnsubscribers: (() => void)[] = [];
+  const subscribedPriceSymbols = new Set<string>();
 
   // Send cached prices immediately on connect
   const symbols = getCachedSymbols();
@@ -236,16 +238,22 @@ wss.on('connection', (ws: WebSocket) => {
     }
   }
 
-  // Push live price updates every 2 seconds
+  // Lightweight fallback heartbeat in case a browser misses an event.
   const interval = setInterval(() => {
     if (ws.readyState !== WebSocket.OPEN) return;
-    for (const symbol of getCachedSymbols()) {
+    for (const symbol of subscribedPriceSymbols) {
       const live = getLivePrice(symbol);
       if (live) {
-        ws.send(JSON.stringify({ type: 'price', symbol, ...live }));
+        ws.send(JSON.stringify({
+          type: 'price',
+          symbol,
+          ...live,
+          eventTime: Date.now(),
+          receivedAt: Date.now(),
+        }));
       }
     }
-  }, 2000);
+  }, 10_000);
 
   // Handle client requests
   ws.on('message', (raw: WebSocket.Data) => {
@@ -253,7 +261,21 @@ wss.on('connection', (ws: WebSocket) => {
       const msg = JSON.parse(raw.toString());
 
       if (msg.type === 'subscribe' && msg.symbol) {
-        connectSymbol(msg.symbol.toUpperCase());
+        const symbol = msg.symbol.toUpperCase();
+        connectSymbol(symbol);
+        if (!subscribedPriceSymbols.has(symbol)) {
+          subscribedPriceSymbols.add(symbol);
+          const unsub = subscribePrice(symbol, (live) => {
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({
+                type: 'price',
+                symbol,
+                ...live,
+              }));
+            }
+          });
+          priceUnsubscribers.push(unsub);
+        }
       }
 
       // Subscribe to kline updates for a specific symbol:interval
@@ -292,6 +314,9 @@ wss.on('connection', (ws: WebSocket) => {
   ws.on('close', () => {
     console.log('[WS] Frontend client disconnected');
     clearInterval(interval);
+    for (const unsub of priceUnsubscribers) {
+      try { unsub(); } catch {}
+    }
     // Clean up kline subscriptions
     for (const unsub of klineUnsubscribers) {
       try { unsub(); } catch {}

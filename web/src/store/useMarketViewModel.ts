@@ -21,6 +21,7 @@ import { supabase } from '../lib/supabase';
 
 const MAX_5M_CANDLES = 300;
 const MAX_15M_CANDLES = 200;
+const DEFAULT_LIVE_FEED_ID = 'binance-futures-bookticker';
 
 export function useMarketViewModel() {
   // Core state
@@ -40,6 +41,7 @@ export function useMarketViewModel() {
   const [chartLoading, setChartLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
   const [dataFreshness, setDataFreshness] = useState<DataFreshness>(connectingFreshness);
+  const [signalSource, setSignalSource] = useState<'closed-candle' | 'live-preview'>('live-preview');
   const [microstructure, setMicrostructure] = useState<MarketMicrostructure>(emptyMicrostructure);
   const [devLogs, setDevLogs] = useState<string[]>([]);
   const [restLogs, setRestLogs] = useState<string[]>([]);
@@ -50,6 +52,7 @@ export function useMarketViewModel() {
   const [autoTradeEnabled, setAutoTradeEnabled] = useState(true);
   const [cryptoPair, setCryptoPair] = useState('BTC/USDT');
   const [fiatCurrency, setFiatCurrency] = useState('USD');
+  const [selectedLiveFeedId, setSelectedLiveFeedId] = useState(DEFAULT_LIVE_FEED_ID);
   const [liveFeedStatus, setLiveFeedStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'error'>('disconnected');
   const [liveFeedLatency, setLiveFeedLatency] = useState<number | null>(null);
   const [liveFeedMsgCount, setLiveFeedMsgCount] = useState(0);
@@ -165,6 +168,13 @@ export function useMarketViewModel() {
     // Only update official active signal when the latest 5m candle is closed
     const latestCandle = fmc[fmc.length - 1];
     const isClosed = latestCandle?.isClosed === true;
+
+    // Track signal source: closed-candle = official, live-preview = forming candle
+    if (isClosed) {
+      setSignalSource('closed-candle');
+    } else {
+      setSignalSource('live-preview');
+    }
 
     // Update active signal cache
     let modified = { ...newSignal };
@@ -348,6 +358,8 @@ export function useMarketViewModel() {
       const mergedSignal = { ...response, price: livePrice };
       setSignal(mergedSignal);
       setActiveSignal(mergedSignal);
+      // Backend signal is always calculated from closed candles
+      setSignalSource('closed-candle');
       setLastUpdated(Date.now());
 
       if (response.microstructure) {
@@ -456,17 +468,18 @@ export function useMarketViewModel() {
     setLiveFeedMsgCount(0);
   }, []);
 
-  const connectLiveFeed = useCallback((_feedId?: string) => {
-    // Live price now comes through the backend WebSocket (subscribeToPrices)
-    // No direct exchange connections — backend proxies all market data
-    setLiveFeedStatus('connected');
-    setStatusMessage('Live via backend');
-  }, []);
+  const connectLiveFeed = useCallback((feedId: string = selectedLiveFeedId) => {
+    const nextFeedId = feedId || DEFAULT_LIVE_FEED_ID;
+    setSelectedLiveFeedId(nextFeedId);
+    setLiveFeedStatus('connecting');
+    setStatusMessage('Connecting live feed via backend...');
+    connectBackendWebSocket();
+    sendSubscribe(symbol);
+  }, [selectedLiveFeedId, symbol]);
 
-  const applyLiveFeed = useCallback((_feedId?: string) => {
-    // No-op: live feed is always the backend WebSocket
-    setLiveFeedStatus('connected');
-  }, []);
+  const applyLiveFeed = useCallback((feedId: string = selectedLiveFeedId) => {
+    connectLiveFeed(feedId);
+  }, [connectLiveFeed, selectedLiveFeedId]);
 
   const refreshAll = async (): Promise<{ success: boolean; message: string }> => {
     setIsLoading(true);
@@ -501,6 +514,8 @@ export function useMarketViewModel() {
       const mergedSignal = { ...signalResponse, price: livePrice };
       setSignal(mergedSignal);
       setActiveSignal(mergedSignal);
+      // Backend cached signal is always calculated from closed candles
+      setSignalSource('closed-candle');
 
       // Cached signal includes microstructure
       if (signalResponse.microstructure) {
@@ -529,11 +544,14 @@ export function useMarketViewModel() {
 
     // Subscribe to live price updates from backend (replaces direct exchange WebSocket)
     const unsubscribe = subscribeToPrices((update: LivePriceUpdate) => {
-      if (update.symbol !== symbol) return;
+      if (update.symbol !== currentSymbolRef.current) return;
       const price = update.price;
       if (!Number.isFinite(price) || price <= 0) return;
 
       const tickTime = Date.now();
+      if (update.eventTime && Number.isFinite(update.eventTime)) {
+        setLiveFeedLatency(Math.max(0, tickTime - update.eventTime));
+      }
       const quantity = 0; // backend doesn't stream quantity yet
       applyLivePriceToSignals(price);
       handleLiveTrade({ price, quantity, time: tickTime });
@@ -565,13 +583,11 @@ export function useMarketViewModel() {
       (msg) => addLog(`Signal WSS Error: ${msg}`),
     );
 
-    // Live feed is now the backend WebSocket — no direct exchange connections
-    setLiveFeedStatus('connected');
-    setStatusMessage('Live via backend');
+    connectLiveFeed(selectedLiveFeedId);
 
     refreshAll();
     return unsubscribe;
-  }, [applyLivePriceToSignals, handleLiveTrade, updateSelectedChartPrice, addLog, symbol]);
+  }, [applyLivePriceToSignals, handleLiveTrade, updateSelectedChartPrice, addLog, symbol, connectLiveFeed, selectedLiveFeedId]);
 
   // Fetch exchange rates from backend (which calls CoinGecko)
   useEffect(() => {
@@ -619,7 +635,10 @@ export function useMarketViewModel() {
     chartHistoryReadyRef.current = false;
     setSignal(placeholderSignal);
     setActiveSignal(placeholderSignal);
+    setSignalSource('live-preview');
     livePriceRef.current = 0;
+    backendWsConnectedRef.current = false;
+    setLiveFeedMsgCount(0);
 
     // Subscribe backend WebSocket to new symbol
     sendSubscribe(symbol);
@@ -647,7 +666,7 @@ export function useMarketViewModel() {
     );
 
     // Reconnect live price feed for new pair (backend WebSocket handles this)
-    setLiveFeedStatus('connected');
+    connectLiveFeed(selectedLiveFeedId);
 
     // Fetch candles for new pair
     addLog(`[Pair] Switched to ${cryptoPair}, fetching all data...`);
@@ -817,6 +836,7 @@ export function useMarketViewModel() {
       const mergedSignal = { ...latestSignal, price: livePrice };
       setSignal(mergedSignal);
       setActiveSignal(mergedSignal);
+      setSignalSource('closed-candle'); // Force refresh always uses closed-candle signal
 
       if (latestSignal.microstructure) {
         setMicrostructure(latestSignal.microstructure);
@@ -838,12 +858,12 @@ export function useMarketViewModel() {
     // State
     fiveMinuteCandles, fifteenMinuteCandles, selectedChartCandles,
     signal, activeSignal, tradeQuote,
-    statusMessage, isLoading, chartLoading, lastUpdated, dataFreshness,
+    statusMessage, isLoading, chartLoading, lastUpdated, dataFreshness, signalSource,
     microstructure, devLogs, restLogs, clearDevLogs, clearRestLogs,
     selectedChartTimeframe, investmentAmount, feeAndSpreadPercent,
     autoTradeEnabled, cryptoPair, fiatCurrency,
     buySound, sellSound,
-    liveFeedStatus, liveFeedLatency, liveFeedMsgCount,
+    selectedLiveFeedId, liveFeedStatus, liveFeedLatency, liveFeedMsgCount,
     paperTrading, ptVersion,
     exchangeRate: getExchangeRate(),
 

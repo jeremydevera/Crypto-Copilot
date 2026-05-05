@@ -19,8 +19,19 @@ interface StreamConnection {
   subscribers: Set<(data: any) => void>;
 }
 
+interface LivePriceSnapshot {
+  price: number;
+  bidPrice: number;
+  askPrice: number;
+  eventTime: number;
+  receivedAt: number;
+}
+
 // Active connections — one per symbol (bookTicker + depth + default klines)
 const connections = new Map<string, StreamConnection>();
+
+// Live price subscribers: key = symbol → set of callback functions
+const priceSubscribers = new Map<string, Set<(live: LivePriceSnapshot) => void>>();
 
 // Kline subscribers: key = "symbol:interval" → set of callback functions
 const klineSubscribers = new Map<string, Set<(candle: Candle) => void>>();
@@ -52,6 +63,34 @@ export function disconnectSymbol(symbol: string): void {
 export function isConnected(symbol: string): boolean {
   const conn = connections.get(symbol);
   return conn?.ws.readyState === WebSocket.OPEN;
+}
+
+export function subscribePrice(symbol: string, callback: (live: LivePriceSnapshot) => void): () => void {
+  const normalizedSymbol = symbol.toUpperCase();
+  if (!priceSubscribers.has(normalizedSymbol)) {
+    priceSubscribers.set(normalizedSymbol, new Set());
+  }
+
+  priceSubscribers.get(normalizedSymbol)!.add(callback);
+  connectSymbol(normalizedSymbol);
+
+  const live = getLivePrice(normalizedSymbol);
+  if (live) {
+    queueMicrotask(() => callback({
+      ...live,
+      eventTime: Date.now(),
+      receivedAt: Date.now(),
+    }));
+  }
+
+  return () => {
+    const subs = priceSubscribers.get(normalizedSymbol);
+    if (!subs) return;
+    subs.delete(callback);
+    if (subs.size === 0) {
+      priceSubscribers.delete(normalizedSymbol);
+    }
+  };
 }
 
 // ── Kline subscription management ────────────────────────────
@@ -225,6 +264,24 @@ class BinanceCombinedStream {
       bookTicker: bt,
     };
     cached.lastUpdated = Date.now();
+
+    const price = (bt.bidPrice + bt.askPrice) / 2;
+    const eventTime = Number(data.E ?? data.T ?? Date.now());
+    if (Number.isFinite(price) && price > 0) {
+      const subs = priceSubscribers.get(this.symbol);
+      if (subs) {
+        const snapshot: LivePriceSnapshot = {
+          price,
+          bidPrice: bt.bidPrice,
+          askPrice: bt.askPrice,
+          eventTime: Number.isFinite(eventTime) ? eventTime : Date.now(),
+          receivedAt: Date.now(),
+        };
+        for (const cb of subs) {
+          try { cb(snapshot); } catch {}
+        }
+      }
+    }
   }
 
   private handleKline(data: any): void {

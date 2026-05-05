@@ -33,3 +33,4 @@ dist-ssr
 DerivedData
 xcuserdata
 *.xcuserstate
+backend/.tmp/

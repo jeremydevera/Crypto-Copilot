@@ -3,12 +3,26 @@ import { setFiatCurrency, getExchangeRate } from '../engine/formatters';
 import { BUY_SOUND_OPTIONS, SELL_SOUND_OPTIONS, previewSound, type SoundId } from '../engine/sounds';
 import { useAuth } from '../hooks/useAuth';
 import { saveUserConfigToSupabase } from '../services/SupabaseSync';
+import { getSocketFeeds, type SocketFeedConfig } from '../data/socketFeeds';
 
 interface SettingsTabProps { vm: any; }
 
 export default function SettingsTab({ vm }: SettingsTabProps) {
   const { user } = useAuth();
   const pt = vm.paperTrading;
+  const socketFeeds: SocketFeedConfig[] = getSocketFeeds(vm.cryptoPair);
+  const [pendingFeedId, setPendingFeedId] = useState(vm.selectedLiveFeedId ?? 'binance-futures-bookticker');
+  const selectedFeed = socketFeeds.find(feed => feed.id === vm.selectedLiveFeedId) ?? socketFeeds.find(feed => feed.id === 'binance-futures-bookticker');
+  const pendingFeed = socketFeeds.find(feed => feed.id === pendingFeedId) ?? selectedFeed;
+  const feedGroups = socketFeeds.reduce<Record<string, SocketFeedConfig[]>>((groups, feed) => {
+    groups[feed.provider] = groups[feed.provider] ?? [];
+    groups[feed.provider].push(feed);
+    return groups;
+  }, {});
+
+  useEffect(() => {
+    setPendingFeedId(vm.selectedLiveFeedId ?? 'binance-futures-bookticker');
+  }, [vm.selectedLiveFeedId, vm.cryptoPair]);
 
   return (
     <>
@@ -135,15 +149,45 @@ export default function SettingsTab({ vm }: SettingsTabProps) {
       {/* Connection */}
       <div className="bg-gray-900 rounded-xl p-5 space-y-4">
         <h2 className="text-sm font-bold text-gray-400 uppercase tracking-wider">Connection</h2>
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm text-gray-200 font-medium">Backend WebSocket</p>
-            <p className="text-xs text-gray-500 mt-0.5">All market data is proxied through the backend server</p>
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-gray-200 font-medium">WebSocket Feed</p>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Current: <span className="text-gray-300">{selectedFeed?.label ?? 'Backend Feed'}</span> via backend
+              </p>
+            </div>
+            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${vm.liveFeedStatus === 'connected' ? 'bg-green-900/50 text-green-400' : vm.liveFeedStatus === 'connecting' ? 'bg-yellow-900/50 text-yellow-400' : 'bg-red-900/50 text-red-400'}`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${vm.liveFeedStatus === 'connected' ? 'bg-green-400' : vm.liveFeedStatus === 'connecting' ? 'bg-yellow-400' : 'bg-red-400'}`} />
+              {vm.liveFeedStatus === 'connected' ? 'Connected' : vm.liveFeedStatus === 'connecting' ? 'Connecting...' : 'Disconnected'}
+            </span>
           </div>
-          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${vm.liveFeedStatus === 'connected' ? 'bg-green-900/50 text-green-400' : vm.liveFeedStatus === 'connecting' ? 'bg-yellow-900/50 text-yellow-400' : 'bg-red-900/50 text-red-400'}`}>
-            <span className={`w-1.5 h-1.5 rounded-full ${vm.liveFeedStatus === 'connected' ? 'bg-green-400' : vm.liveFeedStatus === 'connecting' ? 'bg-yellow-400' : 'bg-red-400'}`} />
-            {vm.liveFeedStatus === 'connected' ? 'Connected' : vm.liveFeedStatus === 'connecting' ? 'Connecting...' : 'Disconnected'}
-          </span>
+
+          <div className="flex gap-2">
+            <select
+              value={pendingFeedId}
+              onChange={e => setPendingFeedId(e.target.value)}
+              className="flex-1 bg-gray-800 rounded-lg px-4 py-2.5 text-sm text-gray-200 border border-gray-700 focus:border-blue-500 outline-none transition-colors"
+            >
+              {Object.entries(feedGroups).map(([provider, feeds]) => (
+                <optgroup key={provider} label={provider}>
+                  {feeds.map(feed => (
+                    <option key={feed.id} value={feed.id}>{feed.label}</option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+            <button
+              onClick={() => vm.applyLiveFeed(pendingFeed?.id ?? pendingFeedId)}
+              className="bg-blue-900/50 hover:bg-blue-800/50 text-blue-400 text-sm font-bold py-2 px-5 rounded-lg transition-colors disabled:opacity-50"
+              disabled={pendingFeedId === vm.selectedLiveFeedId && vm.liveFeedStatus === 'connected'}
+            >
+              Apply
+            </button>
+          </div>
+          <p className="text-xs text-gray-500">
+            The browser connects to your backend; the backend owns the exchange connection.
+          </p>
         </div>
         {vm.liveFeedMsgCount > 0 && (
           <p className="text-xs text-gray-500">

@@ -6,7 +6,7 @@
 
 import type { Candle } from '../engine/types';
 
-const WS_URL = import.meta.env.VITE_BACKEND_WS_URL ?? 'ws://localhost:3001/ws';
+const WS_URL = import.meta.env.VITE_BACKEND_WS_URL ?? 'ws://127.0.0.1:3001/ws';
 
 export interface LivePriceUpdate {
   type: 'price';
@@ -14,6 +14,8 @@ export interface LivePriceUpdate {
   price: number;
   bidPrice: number;
   askPrice: number;
+  eventTime?: number;
+  receivedAt?: number;
 }
 
 export interface KlineUpdate {
@@ -30,6 +32,7 @@ let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectAttempts = 0;
 const MAX_RECONNECT = 20;
 const subscribers = new Set<PriceCallback>();
+const activePriceSubscriptions = new Set<string>();
 
 // Queue of messages to send once WebSocket is open
 const pendingMessages: string[] = [];
@@ -40,6 +43,11 @@ function flushPendingMessages(): void {
       try { ws.send(msg); } catch {}
     }
     pendingMessages.length = 0;
+    for (const symbol of activePriceSubscriptions.values()) {
+      try {
+        ws.send(JSON.stringify({ type: 'subscribe', symbol }));
+      } catch {}
+    }
     // Re-send active kline subscriptions on reconnect
     for (const sub of activeKlineSubscriptions.values()) {
       try {
@@ -114,11 +122,14 @@ export function subscribeToPrices(callback: PriceCallback): () => void {
 }
 
 export function sendSubscribe(symbol: string): void {
-  const msg = JSON.stringify({ type: 'subscribe', symbol });
+  const normalizedSymbol = symbol.toUpperCase();
+  activePriceSubscriptions.add(normalizedSymbol);
+  const msg = JSON.stringify({ type: 'subscribe', symbol: normalizedSymbol });
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(msg);
   } else {
     pendingMessages.push(msg);
+    connectBackendWebSocket();
   }
 }
 
