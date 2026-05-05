@@ -274,7 +274,7 @@ final class MarketViewModel: ObservableObject {
         } catch {
             addRestLog("❌ ERROR: \(error.localizedDescription)")
             addLog("Backend API Error: \(error.localizedDescription)")
-            statusMessage = "Backend unavailable. Start the web backend on port 3001."
+            statusMessage = "Backend unavailable. Check your internet connection or backend server."
         }
 
         isLoading = false

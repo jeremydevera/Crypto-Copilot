@@ -17,7 +17,8 @@ final class BackendWebSocketService {
     var onError: (@MainActor (String) -> Void)?
 
     private var wsURL: URL {
-        let raw = ProcessInfo.processInfo.environment["CRYPTO_COPILOT_WS_URL"] ?? "ws://localhost:3001/ws"
+        let raw = ProcessInfo.processInfo.environment["CRYPTO_COPILOT_WS_URL"]
+            ?? "wss://trading-copilot-backend-1p9r.onrender.com/ws"
         return URL(string: raw)!
     }
 

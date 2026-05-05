@@ -18,7 +18,10 @@ enum BackendMarketError: LocalizedError {
 }
 
 enum BackendMarketService {
-    static var baseURL = URL(string: ProcessInfo.processInfo.environment["CRYPTO_COPILOT_API_URL"] ?? "http://localhost:3001")!
+    static var baseURL = URL(
+        string: ProcessInfo.processInfo.environment["CRYPTO_COPILOT_API_URL"]
+            ?? "https://trading-copilot-backend-1p9r.onrender.com"
+    )!
 
     static func fetchSignal(
         symbol: String,
