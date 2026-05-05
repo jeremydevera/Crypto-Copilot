@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { getSocketFeeds, type SocketFeedConfig } from '../data/socketFeeds';
 import { setFiatCurrency, getExchangeRate } from '../engine/formatters';
 import { BUY_SOUND_OPTIONS, SELL_SOUND_OPTIONS, previewSound, type SoundId } from '../engine/sounds';
 import { useAuth } from '../hooks/useAuth';
@@ -10,19 +9,6 @@ interface SettingsTabProps { vm: any; }
 export default function SettingsTab({ vm }: SettingsTabProps) {
   const { user } = useAuth();
   const pt = vm.paperTrading;
-  const [pendingFeedId, setPendingFeedId] = useState(vm.selectedLiveFeedId ?? 'binance-futures-bookticker');
-  const SOCKET_FEEDS = getSocketFeeds(vm.cryptoPair);
-  const selectedFeed = SOCKET_FEEDS.find(feed => feed.id === vm.selectedLiveFeedId);
-  const pendingFeed = SOCKET_FEEDS.find(feed => feed.id === pendingFeedId);
-  const feedGroups = SOCKET_FEEDS.reduce((acc, feed) => {
-    if (!acc[feed.provider]) acc[feed.provider] = [];
-    acc[feed.provider].push(feed);
-    return acc;
-  }, {} as Record<string, SocketFeedConfig[]>);
-
-  useEffect(() => {
-    setPendingFeedId(vm.selectedLiveFeedId ?? 'binance-futures-bookticker');
-  }, [vm.selectedLiveFeedId]);
 
   return (
     <>
@@ -149,37 +135,22 @@ export default function SettingsTab({ vm }: SettingsTabProps) {
       {/* Connection */}
       <div className="bg-gray-900 rounded-xl p-5 space-y-4">
         <h2 className="text-sm font-bold text-gray-400 uppercase tracking-wider">Connection</h2>
-        <div>
-          <label className="text-sm text-gray-400 block mb-1.5">WebSocket Feed</label>
-          <div className="flex items-center gap-2">
-            <select
-              value={pendingFeedId}
-              onChange={e => setPendingFeedId(e.target.value)}
-              className="flex-1 bg-gray-800 rounded-lg px-4 py-2.5 text-sm text-gray-200 border border-gray-700 focus:border-green-500 outline-none transition-colors appearance-none bg-[url('data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2212%22%20height%3D%2212%22%20viewBox%3D%220%200%2012%2012%22%3E%3Cpath%20d%3D%22M2%204l4%204%204-4%22%20fill%3D%22none%22%20stroke%3D%22%239ca3af%22%20stroke-width%3D%221.5%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%2F%3E%3C%2Fsvg%3E')] bg-[length:12px] bg-[position:right_12px_center] bg-no-repeat pr-8"
-            >
-              {Object.entries(feedGroups).map(([provider, feeds]) => (
-                <optgroup key={provider} label={provider}>
-                  {feeds.map(feed => (
-                    <option key={feed.id} value={feed.id}>{feed.label}</option>
-                  ))}
-                </optgroup>
-              ))}
-            </select>
-            <button
-              onClick={() => vm.applyLiveFeed(pendingFeedId)}
-              disabled={pendingFeedId === vm.selectedLiveFeedId && vm.liveFeedStatus === 'connected'}
-              className="bg-green-600 hover:bg-green-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-bold py-2.5 px-5 rounded-lg transition-colors"
-            >
-              Apply
-            </button>
-          </div>
-          <p className="text-xs text-gray-600 mt-2">
-            Current: <span className="text-gray-400">{selectedFeed?.label ?? pendingFeed?.label ?? 'Unknown'}</span>
-            {vm.liveFeedLatency !== null && <span> · {vm.liveFeedLatency}ms</span>}
-            {vm.liveFeedMsgCount > 0 && <span> · {vm.liveFeedMsgCount.toLocaleString()} msgs</span>}
-          </p>
-        </div>
         <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm text-gray-200 font-medium">Backend WebSocket</p>
+            <p className="text-xs text-gray-500 mt-0.5">All market data is proxied through the backend server</p>
+          </div>
+          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${vm.liveFeedStatus === 'connected' ? 'bg-green-900/50 text-green-400' : vm.liveFeedStatus === 'connecting' ? 'bg-yellow-900/50 text-yellow-400' : 'bg-red-900/50 text-red-400'}`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${vm.liveFeedStatus === 'connected' ? 'bg-green-400' : vm.liveFeedStatus === 'connecting' ? 'bg-yellow-400' : 'bg-red-400'}`} />
+            {vm.liveFeedStatus === 'connected' ? 'Connected' : vm.liveFeedStatus === 'connecting' ? 'Connecting...' : 'Disconnected'}
+          </span>
+        </div>
+        {vm.liveFeedMsgCount > 0 && (
+          <p className="text-xs text-gray-500">
+            {vm.liveFeedMsgCount.toLocaleString()} price updates received
+          </p>
+        )}
+        <div className="flex items-center justify-between pt-2 border-t border-gray-800">
           <p className="text-sm text-gray-400">Status: <span className="text-green-400">{vm.statusMessage}</span></p>
           <button
             onClick={() => vm.start()}

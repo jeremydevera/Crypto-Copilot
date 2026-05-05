@@ -15,7 +15,6 @@ import {
   type Time,
 } from 'lightweight-charts';
 import { TIMEFRAMES, timeframeTitle } from '../engine/types';
-import { getSocketFeeds } from '../data/socketFeeds';
 import { usd } from '../engine/formatters';
 import { useToast } from './Toast';
 
@@ -238,9 +237,6 @@ export default function ChartTab({ vm }: ChartTabProps) {
     });
   }, [vm.selectedChartTimeframe]);
 
-  const dynamicFeeds = getSocketFeeds(vm.cryptoPair);
-  const selectedFeed = dynamicFeeds.find(f => f.id === vm.selectedLiveFeedId) ?? dynamicFeeds[0];
-
   const candles = vm.selectedChartCandles ?? [];
   const latestCandle = candles.length > 0 ? candles[candles.length - 1] : null;
   const displayCandle = hoveredCandle ?? (latestCandle
@@ -323,8 +319,7 @@ export default function ChartTab({ vm }: ChartTabProps) {
 
         <div className="border border-[#1f2933] bg-[#0f1318]">
           <div className="flex flex-wrap items-center gap-3 border-b border-[#1f2933] bg-[#0b0e11] p-3 text-xs">
-            <span className="text-[#848e9c]">Live feed from Home</span>
-            <span className="font-medium text-gray-200">{selectedFeed?.label ?? 'Unknown feed'}</span>
+            <span className="text-[#848e9c]">Live via backend</span>
             <span className="ml-auto flex items-center gap-1.5 text-[#848e9c]">
               <span className={`h-2 w-2 rounded-full ${vm.liveFeedStatus === 'connected' ? 'bg-[#0ecb81]' : vm.liveFeedStatus === 'connecting' ? 'bg-[#f0b90b] animate-pulse' : vm.liveFeedStatus === 'error' ? 'bg-[#f6465d]' : 'bg-[#5f6673]'}`} />
               {vm.liveFeedStatus === 'connected' ? 'Live' : vm.liveFeedStatus === 'connecting' ? 'Connecting' : vm.liveFeedStatus === 'error' ? 'Error' : 'Offline'}

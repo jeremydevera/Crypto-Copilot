@@ -177,6 +177,34 @@ app.get('/api/price/:symbol', (req, res) => {
   res.json({ symbol, ...live, timestamp: Date.now() });
 });
 
+// ── Exchange Rates Endpoint ──────────────────────────────────
+
+app.get('/api/exchange-rates', async (_req, res) => {
+  try {
+    const cgRes = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd,php,eur,gbp,jpy,krw,inr,aud,cad,sgd');
+    if (!cgRes.ok) {
+      res.status(502).json({ error: 'CoinGecko API unavailable', status: cgRes.status });
+      return;
+    }
+    const data = await cgRes.json();
+    const btcUsd = data?.bitcoin?.usd;
+    if (!btcUsd) {
+      res.status(502).json({ error: 'Invalid CoinGecko response' });
+      return;
+    }
+    const rates: Record<string, number> = { USD: 1 };
+    for (const [currency, value] of Object.entries(data.bitcoin)) {
+      if (currency !== 'usd' && typeof value === 'number') {
+        rates[currency.toUpperCase()] = value / btcUsd;
+      }
+    }
+    res.json({ rates, timestamp: Date.now() });
+  } catch (error: any) {
+    console.error('[ExchangeRates] Error:', error.message);
+    res.status(500).json({ error: 'Failed to fetch exchange rates', details: error.message });
+  }
+});
+
 // ── Start Server (HTTP + WebSocket) ──────────────────────────
 
 const server = http.createServer(app);

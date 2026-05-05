@@ -64,3 +64,25 @@ export async function fetchDepth(symbol: string, _limit: number = 10): Promise<O
   const signal = await fetchBackendSignal(symbol);
   return (signal as TradingSignal & { microstructure?: MarketMicrostructure }).microstructure?.orderBook ?? null;
 }
+
+export async function fetchExchangeRates(): Promise<Record<string, number>> {
+  try {
+    const data = await fetchJson<{ rates: Record<string, number>; timestamp: number }>('/api/exchange-rates');
+    return data.rates;
+  } catch (err: any) {
+    console.warn('[fetchExchangeRates] Failed:', err.message);
+    // Return fallback rates
+    return {
+      USD: 1,
+      PHP: 56,
+      EUR: 0.92,
+      GBP: 0.79,
+      JPY: 149.5,
+      KRW: 1320,
+      INR: 83,
+      AUD: 1.53,
+      CAD: 1.36,
+      SGD: 1.34,
+    };
+  }
+}

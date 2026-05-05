@@ -9,10 +9,10 @@ import type { Candle, TradingSignal, TradeQuote, TradeTick, MarketMicrostructure
 import { placeholderSignal, connectingFreshness, emptyMicrostructure, timeframeSeconds } from '../engine/types';
 import { analyze, calculateTradeQuote, latestSwingLowPublic, nearestSwingHighAbovePricePublic, defaultSlippagePercent } from '../engine/SignalEngine';
 import { BackendKlineWebSocket } from '../services/BackendWebSocket';
-import { fetchBackendSignal, fetchCandles } from '../services/BackendMarketService';
+import { fetchBackendSignal, fetchCandles, fetchExchangeRates } from '../services/BackendMarketService';
 import { connectBackendWebSocket, disconnectBackendWebSocket, subscribeToPrices, sendSubscribe, type LivePriceUpdate } from '../services/BackendWebSocket';
 import { PaperTradingStore } from './PaperTradingStore';
-import { getSocketFeeds, pairToSymbol } from '../data/socketFeeds';
+import { pairToSymbol } from '../data/socketFeeds';
 import type { SoundId } from '../engine/sounds';
 import { playSound } from '../engine/sounds';
 import { setExchangeRates as setFormattersExchangeRates, getExchangeRate } from '../engine/formatters';
@@ -21,7 +21,6 @@ import { supabase } from '../lib/supabase';
 
 const MAX_5M_CANDLES = 300;
 const MAX_15M_CANDLES = 200;
-const DEFAULT_LIVE_FEED_ID = 'binance-futures-bookticker';
 
 export function useMarketViewModel() {
   // Core state
@@ -51,7 +50,6 @@ export function useMarketViewModel() {
   const [autoTradeEnabled, setAutoTradeEnabled] = useState(true);
   const [cryptoPair, setCryptoPair] = useState('BTC/USDT');
   const [fiatCurrency, setFiatCurrency] = useState('USD');
-  const [selectedLiveFeedId, setSelectedLiveFeedId] = useState(DEFAULT_LIVE_FEED_ID);
   const [liveFeedStatus, setLiveFeedStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'error'>('disconnected');
   const [liveFeedLatency, setLiveFeedLatency] = useState<number | null>(null);
   const [liveFeedMsgCount, setLiveFeedMsgCount] = useState(0);
@@ -73,8 +71,6 @@ export function useMarketViewModel() {
 
   const klineWsRef = useRef(new BackendKlineWebSocket());
   const chartWsRef = useRef(new BackendKlineWebSocket());
-  const liveFeedWsRef = useRef<WebSocket | null>(null);
-  const liveFeedMsgCountRef = useRef(0);
   const backendWsConnectedRef = useRef(false);
   const livePriceRef = useRef(0);
   const chartHistoryReadyRef = useRef(false);
@@ -449,126 +445,28 @@ export function useMarketViewModel() {
   }, []);
 
   const disconnectLiveFeed = useCallback(() => {
-    if (liveFeedWsRef.current) {
-      liveFeedWsRef.current.close();
-      liveFeedWsRef.current = null;
-    }
+    // Backend WebSocket handles live price — no separate disconnect needed
     setLiveFeedStatus('disconnected');
     setLiveFeedLatency(null);
     setLiveFeedMsgCount(0);
-    liveFeedMsgCountRef.current = 0;
   }, []);
 
-  const connectLiveFeed = useCallback((feedId: string = selectedLiveFeedId) => {
-    const feeds = getSocketFeeds(cryptoPair);
-    const feed = feeds.find(f => f.id === feedId) ?? feeds.find(f => f.id === DEFAULT_LIVE_FEED_ID) ?? feeds[0];
-    if (!feed) return;
+  const connectLiveFeed = useCallback((_feedId?: string) => {
+    // Live price now comes through the backend WebSocket (subscribeToPrices)
+    // No direct exchange connections — backend proxies all market data
+    setLiveFeedStatus('connected');
+    setStatusMessage('Live via backend');
+  }, []);
 
-    if (liveFeedWsRef.current) {
-      liveFeedWsRef.current.close();
-      liveFeedWsRef.current = null;
-    }
-
-    setSelectedLiveFeedId(feed.id);
-    setLiveFeedStatus('connecting');
-    setLiveFeedLatency(null);
-    setLiveFeedMsgCount(0);
-    liveFeedMsgCountRef.current = 0;
-    setStatusMessage(`Connecting ${feed.label}...`);
-
-    try {
-      const ws = new WebSocket(feed.endpoint);
-      liveFeedWsRef.current = ws;
-
-      ws.onopen = () => {
-        // If auth is required, send auth first, then subscribe after auth_success
-        if (feed.authMessage) {
-          ws.send(feed.authMessage);
-          // Subscribe will be sent after auth_success in onmessage
-        } else {
-          setLiveFeedStatus('connected');
-          setStatusMessage(`Live feed: ${feed.label}`);
-          if (feed.subscribe) ws.send(feed.subscribe);
-        }
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const msg = JSON.parse(event.data);
-
-          // Handle TickrData auth response
-          if (feed.authMessage && msg.type === 'auth_success') {
-            setLiveFeedStatus('connected');
-            setStatusMessage(`Live feed: ${feed.label}`);
-            if (feed.subscribe) ws.send(feed.subscribe);
-            return;
-          }
-          // Handle TickrData and other protocol errors (arrive as JSON messages, not onerror)
-          if (msg.type === 'error') {
-            const errorCode = msg.code || '';
-            const errorMsg = msg.message || 'Unknown error';
-            if (errorCode === 'CONNECTION_LIMIT_EXCEEDED' || errorCode === 'INVALID_API_KEY' || errorCode === 'REVOKED_API_KEY' || errorCode === 'MISSING_API_KEY') {
-              setLiveFeedStatus('error');
-              setStatusMessage(`${feed.label}: ${errorMsg}`);
-              ws.close();
-            } else {
-              setStatusMessage(`${feed.label} error: ${errorMsg}`);
-            }
-            return;
-          }
-          // Ignore subscription confirmations
-          if (msg.type === 'subscribed' || msg.type === 'unsubscribed') return;
-
-          const price = feed.parsePrice(msg);
-          if (price === null || Number.isNaN(price) || price <= 0) return;
-
-          const eventTime = feed.parseEventTime(msg);
-          const latency = eventTime ? Date.now() - eventTime : null;
-          if (latency !== null && Number.isFinite(latency)) setLiveFeedLatency(latency);
-
-          liveFeedMsgCountRef.current += 1;
-          setLiveFeedMsgCount(liveFeedMsgCountRef.current);
-
-          const tickTime = Date.now();
-          const quantity = extractFeedQuantity(msg);
-          applyLivePriceToSignals(price);
-          handleLiveTrade({ price, quantity, time: tickTime });
-          updateSelectedChartPrice(price, quantity, tickTime);
-        } catch {}
-      };
-
-      ws.onerror = () => {
-        if (liveFeedWsRef.current !== ws) return;
-        setLiveFeedStatus('error');
-        setStatusMessage(`Connection failed: ${feed.label}`);
-      };
-
-      ws.onclose = (event) => {
-        if (liveFeedWsRef.current !== ws) return;
-        setLiveFeedStatus(prev => {
-          if (!event.wasClean && prev !== 'error') {
-            setStatusMessage(`${feed.label} disconnected unexpectedly`);
-          }
-          return prev === 'error' ? prev : 'disconnected';
-        });
-      };
-    } catch {
-      setLiveFeedStatus('error');
-      setStatusMessage(`Live feed error: ${feed.label}`);
-    }
-  }, [applyLivePriceToSignals, handleLiveTrade, selectedLiveFeedId, updateSelectedChartPrice, cryptoPair]);
-
-  const applyLiveFeed = useCallback((feedId: string) => {
-    connectLiveFeed(feedId);
-  }, [connectLiveFeed]);
+  const applyLiveFeed = useCallback((_feedId?: string) => {
+    // No-op: live feed is always the backend WebSocket
+    setLiveFeedStatus('connected');
+  }, []);
 
   const refreshAll = async (): Promise<{ success: boolean; message: string }> => {
     setIsLoading(true);
     setStatusMessage(`Syncing ${cryptoPair} history...`);
     addRestLog('Initiating backend API fetch...');
-
-    // Reconnect live feed on refresh (idempotent — closes existing connection first)
-    connectLiveFeed(selectedLiveFeedId);
 
     try {
       addRestLog(`Fetching ${symbol} candles (5m,15m,1h,4h) + signal...`);
@@ -614,12 +512,12 @@ export function useMarketViewModel() {
   };
 
   const start = useCallback(() => {
-    addLog(`[Start] Initializing ${symbol} — connecting WS and fetching data...`);
+    addLog(`[Start] Initializing ${symbol} — connecting backend WS and fetching data...`);
     // Connect to backend WebSocket for live price updates
     connectBackendWebSocket();
     sendSubscribe(symbol);
 
-    // Subscribe to live price updates from backend
+    // Subscribe to live price updates from backend (replaces direct exchange WebSocket)
     const unsubscribe = subscribeToPrices((update: LivePriceUpdate) => {
       if (update.symbol !== symbol) return;
       const price = update.price;
@@ -632,6 +530,8 @@ export function useMarketViewModel() {
       updateSelectedChartPrice(price, quantity, tickTime);
       setLastUpdated(tickTime);
       backendWsConnectedRef.current = true;
+      setLiveFeedStatus('connected');
+      setLiveFeedMsgCount(prev => prev + 1);
     });
 
     // Also connect kline WebSocket for candle updates (supplementary)
@@ -655,31 +555,22 @@ export function useMarketViewModel() {
       (msg) => addLog(`Signal WSS Error: ${msg}`),
     );
 
-    // Connect live price feed (Binance Futures BookTicker by default)
-    connectLiveFeed(selectedLiveFeedId);
+    // Live feed is now the backend WebSocket — no direct exchange connections
+    setLiveFeedStatus('connected');
+    setStatusMessage('Live via backend');
 
     refreshAll();
     return unsubscribe;
-  }, [applyLivePriceToSignals, handleLiveTrade, updateSelectedChartPrice, addLog, symbol, connectLiveFeed, selectedLiveFeedId]);
+  }, [applyLivePriceToSignals, handleLiveTrade, updateSelectedChartPrice, addLog, symbol]);
 
-  // Fetch exchange rates from CoinGecko (free, no API key needed)
+  // Fetch exchange rates from backend (which calls CoinGecko)
   useEffect(() => {
     const fetchRates = async () => {
       try {
-        const res = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd,php,eur,gbp,jpy,krw,inr,aud,cad,sgd');
-        const data = await res.json();
-        const btcUsd = data?.bitcoin?.usd;
-        if (!btcUsd) return;
-        const rates: Record<string, number> = { USD: 1 };
-        for (const [currency, value] of Object.entries(data.bitcoin)) {
-          if (currency !== 'usd' && typeof value === 'number') {
-            rates[currency.toUpperCase()] = value / btcUsd;
-          }
+        const rates = await fetchExchangeRates();
+        if (rates && Object.keys(rates).length > 0) {
+          setFormattersExchangeRates(rates);
         }
-        // CoinGecko returns price per BTC in each currency, so rate = price_in_currency / price_in_usd
-        // But actually we want: how many local units per 1 USD = price_in_local / price_in_usd
-        // Since CoinGecko returns { bitcoin: { usd: 95000, php: 5320000 } }, rate_PHP = 5320000/95000 = 56
-        setFormattersExchangeRates(rates);
       } catch {
         // Fall back to hardcoded rates (already set as defaults)
       }
@@ -701,7 +592,6 @@ export function useMarketViewModel() {
       disconnectBackendWebSocket();
       klineWsRef.current.disconnect();
       chartWsRef.current.disconnect();
-      disconnectLiveFeed();
       if (typeof unsubscribe === 'function') unsubscribe();
     };
   }, []);
@@ -746,8 +636,8 @@ export function useMarketViewModel() {
       (msg) => addLog(`Signal WSS Error: ${msg}`),
     );
 
-    // Reconnect live price feed for new pair
-    connectLiveFeed(selectedLiveFeedId);
+    // Reconnect live price feed for new pair (backend WebSocket handles this)
+    setLiveFeedStatus('connected');
 
     // Fetch candles for new pair
     addLog(`[Pair] Switched to ${cryptoPair}, fetching all data...`);
@@ -895,7 +785,7 @@ export function useMarketViewModel() {
     selectedChartTimeframe, investmentAmount, feeAndSpreadPercent,
     autoTradeEnabled, cryptoPair, fiatCurrency,
     buySound, sellSound,
-    selectedLiveFeedId, liveFeedStatus, liveFeedLatency, liveFeedMsgCount,
+    liveFeedStatus, liveFeedLatency, liveFeedMsgCount,
     paperTrading, ptVersion,
     exchangeRate: getExchangeRate(),
 
@@ -923,10 +813,4 @@ function normalizeCandles(candles: Candle[], limit: number): Candle[] {
 
   const sorted = Array.from(byOpenTime.values()).sort((a, b) => a.openTime - b.openTime);
   return sorted.length > limit ? sorted.slice(sorted.length - limit) : sorted;
-}
-
-function extractFeedQuantity(msg: any): number {
-  const raw = msg.q ?? msg.Q ?? msg.B ?? msg.A ?? msg.l ?? 0;
-  const quantity = typeof raw === 'number' ? raw : parseFloat(raw);
-  return Number.isFinite(quantity) ? quantity : 0;
 }
