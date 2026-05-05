@@ -22,7 +22,21 @@ const PORT = process.env.PORT || 3001;
 
 // ── Middleware ────────────────────────────────────────────────
 
-app.use(cors());
+// ── CORS ──────────────────────────────────────────────────────
+const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',').map(o => o.trim()) ?? [];
+
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow requests with no origin (mobile apps, curl, Postman)
+    // or if ALLOWED_ORIGINS is not set (dev mode — allow all)
+    if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error(`Origin not allowed by CORS: ${origin}`));
+    }
+  },
+  credentials: true,
+}));
 app.use(express.json());
 
 // ── Health Check ─────────────────────────────────────────────
@@ -324,7 +338,7 @@ wss.on('connection', (ws: WebSocket) => {
   });
 });
 
-server.listen(PORT, () => {
+server.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Crypto Copilot backend running on port ${PORT}`);
   console.log(`   Signal:  http://localhost:${PORT}/api/signal/BTCUSDT?mode=pro`);
   console.log(`   Candles: http://localhost:${PORT}/api/candles/BTCUSDT?interval=15m`);
