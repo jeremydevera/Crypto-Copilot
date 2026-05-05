@@ -40,7 +40,6 @@ export function useMarketViewModel() {
   const [chartLoading, setChartLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
   const [dataFreshness, setDataFreshness] = useState<DataFreshness>(connectingFreshness);
-  const [signalSource, setSignalSource] = useState<'closed-candle' | 'live-preview'>('live-preview');
   const [microstructure, setMicrostructure] = useState<MarketMicrostructure>(emptyMicrostructure);
   const [devLogs, setDevLogs] = useState<string[]>([]);
   const [restLogs, setRestLogs] = useState<string[]>([]);
@@ -166,13 +165,6 @@ export function useMarketViewModel() {
     // Only update official active signal when the latest 5m candle is closed
     const latestCandle = fmc[fmc.length - 1];
     const isClosed = latestCandle?.isClosed === true;
-
-    // Track signal source: closed-candle = official, live-preview = forming candle
-    if (isClosed) {
-      setSignalSource('closed-candle');
-    } else {
-      setSignalSource('live-preview');
-    }
 
     // Update active signal cache
     let modified = { ...newSignal };
@@ -356,8 +348,6 @@ export function useMarketViewModel() {
       const mergedSignal = { ...response, price: livePrice };
       setSignal(mergedSignal);
       setActiveSignal(mergedSignal);
-      // Backend signal is always calculated from closed candles
-      setSignalSource('closed-candle');
       setLastUpdated(Date.now());
 
       if (response.microstructure) {
@@ -511,8 +501,6 @@ export function useMarketViewModel() {
       const mergedSignal = { ...signalResponse, price: livePrice };
       setSignal(mergedSignal);
       setActiveSignal(mergedSignal);
-      // Backend cached signal is always calculated from closed candles
-      setSignalSource('closed-candle');
 
       // Cached signal includes microstructure
       if (signalResponse.microstructure) {
@@ -631,7 +619,6 @@ export function useMarketViewModel() {
     chartHistoryReadyRef.current = false;
     setSignal(placeholderSignal);
     setActiveSignal(placeholderSignal);
-    setSignalSource('live-preview');
     livePriceRef.current = 0;
 
     // Subscribe backend WebSocket to new symbol
@@ -830,7 +817,6 @@ export function useMarketViewModel() {
       const mergedSignal = { ...latestSignal, price: livePrice };
       setSignal(mergedSignal);
       setActiveSignal(mergedSignal);
-      setSignalSource('closed-candle'); // Force refresh always uses closed-candle signal
 
       if (latestSignal.microstructure) {
         setMicrostructure(latestSignal.microstructure);
@@ -852,7 +838,7 @@ export function useMarketViewModel() {
     // State
     fiveMinuteCandles, fifteenMinuteCandles, selectedChartCandles,
     signal, activeSignal, tradeQuote,
-    statusMessage, isLoading, chartLoading, lastUpdated, dataFreshness, signalSource,
+    statusMessage, isLoading, chartLoading, lastUpdated, dataFreshness,
     microstructure, devLogs, restLogs, clearDevLogs, clearRestLogs,
     selectedChartTimeframe, investmentAmount, feeAndSpreadPercent,
     autoTradeEnabled, cryptoPair, fiatCurrency,

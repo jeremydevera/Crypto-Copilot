@@ -98,9 +98,6 @@ export default function HomeTab({ vm }: HomeTabProps) {
               <div className="flex items-center gap-1.5 mt-0.5">
                 <div className={`w-2 h-2 rounded-full ${freshnessDot(vm.dataFreshness)}`} />
                 <span className="text-xs text-gray-500">{freshnessLabel(vm.dataFreshness)}</span>
-                <span className={`text-[10px] px-1.5 py-0.5 rounded ${vm.signalSource === 'closed-candle' ? 'bg-green-900/50 text-green-400' : 'bg-yellow-900/50 text-yellow-400'}`}>
-                  {vm.signalSource === 'closed-candle' ? '✓ Closed Candle' : '◐ Live Preview'}
-                </span>
               </div>
             </div>
           </div>
