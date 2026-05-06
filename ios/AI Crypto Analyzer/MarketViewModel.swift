@@ -14,6 +14,7 @@ final class MarketViewModel: ObservableObject {
     @Published private(set) var statusMessage = "Starting ultra-fast WebSockets..."
     @Published private(set) var isLoading = false
     @Published private(set) var lastUpdated: Date?
+    @Published private(set) var lastSignalUpdateTime: Date?
     @Published private(set) var dataFreshness: DataFreshness = .connecting
     @Published private(set) var marketMicrostructure: MarketMicrostructure = .empty
     
@@ -284,6 +285,7 @@ final class MarketViewModel: ObservableObject {
             addLog("Backend API Sync Complete")
             statusMessage = "Backend signal + live price connected"
             lastUpdated = Date()
+            lastSignalUpdateTime = Date()
         } catch {
             wakeUpTask.cancel()
             addRestLog("❌ ERROR: \(error.localizedDescription)")
@@ -326,6 +328,7 @@ final class MarketViewModel: ObservableObject {
             signal = backendSignal
             updateActiveSignalCache()
             updateTradeQuoteCache()
+            lastSignalUpdateTime = Date()
         } catch {
             addRestLog("Cached signal refresh unavailable: \(error.localizedDescription)")
         }

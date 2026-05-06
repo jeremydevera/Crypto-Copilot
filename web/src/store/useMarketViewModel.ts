@@ -40,6 +40,7 @@ export function useMarketViewModel() {
   const [isLoading, setIsLoading] = useState(false);
   const [chartLoading, setChartLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
+  const [lastSignalUpdateTime, setLastSignalUpdateTime] = useState<number | null>(null);
   const [dataFreshness, setDataFreshness] = useState<DataFreshness>(connectingFreshness);
   const [signalSource, setSignalSource] = useState<'closed-candle' | 'live-preview'>('live-preview');
   const [microstructure, setMicrostructure] = useState<MarketMicrostructure>(emptyMicrostructure);
@@ -361,6 +362,7 @@ export function useMarketViewModel() {
       // Backend signal is always calculated from closed candles
       setSignalSource('closed-candle');
       setLastUpdated(Date.now());
+      setLastSignalUpdateTime(Date.now());
 
       if (response.microstructure) {
         setMicrostructure(response.microstructure);
@@ -858,7 +860,7 @@ export function useMarketViewModel() {
     // State
     fiveMinuteCandles, fifteenMinuteCandles, selectedChartCandles,
     signal, activeSignal, tradeQuote,
-    statusMessage, isLoading, chartLoading, lastUpdated, dataFreshness, signalSource,
+    statusMessage, isLoading, chartLoading, lastUpdated, lastSignalUpdateTime, dataFreshness, signalSource,
     microstructure, devLogs, restLogs, clearDevLogs, clearRestLogs,
     selectedChartTimeframe, investmentAmount, feeAndSpreadPercent,
     autoTradeEnabled, cryptoPair, fiatCurrency,

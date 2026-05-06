@@ -562,7 +562,11 @@ struct ContentView: View {
                 }
             }
 
-            if let lastUpdated = viewModel.lastUpdated {
+            if let lastSignalUpdateTime = viewModel.lastSignalUpdateTime {
+                Text("Last signal update: \(lastSignalUpdateTime.formatted(date: .omitted, time: .standard))")
+                    .font(.caption2)
+                    .foregroundStyle(themeComment)
+            } else if let lastUpdated = viewModel.lastUpdated {
                 Text("Last signal update: \(lastUpdated.formatted(date: .omitted, time: .standard))")
                     .font(.caption2)
                     .foregroundStyle(themeComment)
