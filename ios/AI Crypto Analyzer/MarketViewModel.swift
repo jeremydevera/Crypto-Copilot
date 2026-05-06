@@ -189,10 +189,14 @@ final class MarketViewModel: ObservableObject {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
 
         addLog("Connecting to Crypto Copilot backend...")
-        connectBackendWebSocket()
+        statusMessage = "Loading signal from backend..."
+        // Load REST data first, then connect WebSocket in background
         Task {
             await loadSupabaseState()
             await refreshAll()
+            // Connect WebSocket after REST succeeds — live updates are optional
+            addLog("Connecting live price WebSocket...")
+            connectBackendWebSocket()
         }
     }
 
@@ -231,6 +235,17 @@ final class MarketViewModel: ObservableObject {
         addRestLog("Initiating backend API fetch for \(symbol)...")
         statusMessage = "Syncing BTC/USDT from backend..."
 
+        // Show "waking up" message after a short delay (Render free tier cold start)
+        let wakeUpTask = Task {
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                if self.isLoading {
+                    self.statusMessage = "Backend may be waking up, please wait..."
+                }
+            }
+        }
+
         do {
             addRestLog("-> Fetching candles and signal from backend...")
             async let fiveMinute = BackendMarketService.fetchCandles(symbol: symbol, timeframe: .fiveMinutes, limit: 300)
@@ -268,10 +283,12 @@ final class MarketViewModel: ObservableObject {
             updateTradeQuoteCache()
             handleSignalChange()
 
+            wakeUpTask.cancel()
             addLog("Backend API Sync Complete")
             statusMessage = "Backend signal + live price connected"
             lastUpdated = Date()
         } catch {
+            wakeUpTask.cancel()
             addRestLog("❌ ERROR: \(error.localizedDescription)")
             addLog("Backend API Error: \(error.localizedDescription)")
             statusMessage = "Backend unavailable. Check your internet connection or backend server."

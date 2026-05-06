@@ -23,6 +23,15 @@ enum BackendMarketService {
             ?? "https://trading-copilot-backend-1p9r.onrender.com"
     )!
 
+    /// Dedicated session with longer timeout for Render free tier (30-60s cold start)
+    static let session: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 30
+        config.timeoutIntervalForResource = 60
+        config.waitsForConnectivity = true
+        return URLSession(configuration: config)
+    }()
+
     static func fetchSignal(
         symbol: String,
         mode: String = "pro",
@@ -67,10 +76,10 @@ enum BackendMarketService {
     private static func fetchJSON<T: Decodable>(_ url: URL?) async throws -> T {
         guard let url else { throw BackendMarketError.invalidURL }
         var request = URLRequest(url: url)
-        request.timeoutInterval = 8
+        request.timeoutInterval = 30
         request.cachePolicy = .reloadIgnoringLocalCacheData
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await session.data(for: request)
         if let response = response as? HTTPURLResponse, !(200...299).contains(response.statusCode) {
             let body = String(data: data, encoding: .utf8) ?? "No response body."
             throw BackendMarketError.requestFailed("Backend HTTP \(response.statusCode): \(body)")
