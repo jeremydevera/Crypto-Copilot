@@ -49,6 +49,7 @@ app.get('/', (_req: Request, res: Response) => {
     status: 'Crypto Copilot backend running',
     version: '1.0.0',
     endpoints: [
+      'GET /api/health',
       'GET /api/signal/:symbol?mode=normal|pro (full refresh)',
       'GET /api/cached-signal/:symbol (cached, no refresh)',
       'GET /api/candles/:symbol?interval=5m|15m|1h|4h',
@@ -58,6 +59,10 @@ app.get('/', (_req: Request, res: Response) => {
       'WS  /ws — live price + kline stream',
     ],
   });
+});
+
+app.get('/api/health', (_req: Request, res: Response) => {
+  res.json({ status: 'ok', uptime: process.uptime(), timestamp: Date.now() });
 });
 
 app.get('/api/status', (_req: Request, res: Response) => {

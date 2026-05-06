@@ -26,11 +26,13 @@ enum Timeframe: String, CaseIterable, Identifiable {
 
 struct Candle: Identifiable, Equatable {
     let openTime: Date
+    let closeTime: Date?
     let open: Double
     var high: Double
     var low: Double
     var close: Double
     var volume: Double
+    var isClosed: Bool?
 
     var id: Date { openTime }
 }

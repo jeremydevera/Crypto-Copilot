@@ -4,7 +4,7 @@
 // ============================================================
 
 import type { Candle, TradingSignal, BookTicker, OrderBookSnapshot, MarketMicrostructure } from '../engine/types.js';
-import { placeholderSignal, emptyMicrostructure } from '../engine/types.js';
+import { placeholderSignal, emptyMicrostructure, isConfirmedCandle } from '../engine/types.js';
 import { analyze } from '../engine/SignalEngine.js';
 import { fetchCandles, fetchBookTicker, fetchDepth } from '../services/BinanceService.js';
 
@@ -91,10 +91,10 @@ export function calculateSignal(
   data.isCalculating = true;
   try {
     // Filter to only confirmed (closed) candles before analysis
-    const closed5m = data.candles['5m'].filter(c => c.isClosed !== false);
-    const closed15m = data.candles['15m'].filter(c => c.isClosed !== false);
-    const closed1h = data.candles['1h'].filter(c => c.isClosed !== false);
-    const closed4h = data.candles['4h'].filter(c => c.isClosed !== false);
+    const closed5m = data.candles['5m'].filter(isConfirmedCandle);
+    const closed15m = data.candles['15m'].filter(isConfirmedCandle);
+    const closed1h = data.candles['1h'].filter(isConfirmedCandle);
+    const closed4h = data.candles['4h'].filter(isConfirmedCandle);
 
     data.signal = analyze(
       symbol,

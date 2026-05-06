@@ -17,12 +17,27 @@ export function timeframeSeconds(tf: Timeframe): number {
 
 export interface Candle {
   openTime: number; // Unix ms
+  closeTime?: number; // Unix ms
   open: number;
   high: number;
   low: number;
   close: number;
   volume: number;
   isClosed?: boolean; // true if candle is finalized
+}
+
+/**
+ * Strict closed-candle check:
+ * - isClosed === true → confirmed closed
+ * - isClosed === false → still forming
+ * - isClosed undefined + closeTime present → check against now
+ * - isClosed undefined + no closeTime → assume closed (fallback safety)
+ */
+export function isConfirmedCandle(c: Candle): boolean {
+  if (c.isClosed === true) return true;
+  if (c.isClosed === false) return false;
+  if (typeof c.closeTime === 'number') return c.closeTime <= Date.now();
+  return true; // no info — assume closed
 }
 
 export interface IndicatorSnapshot {

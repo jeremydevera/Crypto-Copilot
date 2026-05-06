@@ -153,11 +153,13 @@ export async function fetchCandles(symbol: string, timeframe: string, limit: num
         console.log(`[CoinGecko] Fetched ${data.length} ${timeframe} candles for ${symbol}`);
         return data.map((k: number[]) => ({
           openTime: k[0],
+          closeTime: k[0], // CoinGecko OHLC timestamps are bucket start = close of prior
           open: k[1],
           high: k[2],
           low: k[3],
           close: k[4],
           volume: 0,
+          isClosed: true, // CoinGecko only returns completed candles
         }));
       }
     } else {

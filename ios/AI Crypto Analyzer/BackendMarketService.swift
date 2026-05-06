@@ -108,20 +108,24 @@ private struct BackendCandlesDTO: Decodable {
 
 private struct BackendCandleDTO: Decodable {
     let openTime: Double
+    let closeTime: Double?
     let open: Double
     let high: Double
     let low: Double
     let close: Double
     let volume: Double
+    let isClosed: Bool?
 
     var candle: Candle {
         Candle(
             openTime: Date(timeIntervalSince1970: openTime / 1000),
+            closeTime: closeTime.map { Date(timeIntervalSince1970: $0 / 1000) },
             open: open,
             high: high,
             low: low,
             close: close,
-            volume: volume
+            volume: volume,
+            isClosed: isClosed
         )
     }
 }

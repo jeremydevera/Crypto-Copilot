@@ -24,6 +24,7 @@ export function timeframeSeconds(tf: Timeframe): number {
 
 export interface Candle {
   openTime: number; // Unix ms
+  closeTime?: number; // Unix ms
   open: number;
   high: number;
   low: number;
