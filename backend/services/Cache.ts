@@ -90,12 +90,18 @@ export function calculateSignal(
 
   data.isCalculating = true;
   try {
+    // Filter to only confirmed (closed) candles before analysis
+    const closed5m = data.candles['5m'].filter(c => c.isClosed !== false);
+    const closed15m = data.candles['15m'].filter(c => c.isClosed !== false);
+    const closed1h = data.candles['1h'].filter(c => c.isClosed !== false);
+    const closed4h = data.candles['4h'].filter(c => c.isClosed !== false);
+
     data.signal = analyze(
       symbol,
-      data.candles['5m'],
-      data.candles['15m'],
-      data.candles['1h'],
-      data.candles['4h'],
+      closed5m,
+      closed15m,
+      closed1h,
+      closed4h,
       feeAndSpreadPercent,
       investmentAmount,
       demoBalance,

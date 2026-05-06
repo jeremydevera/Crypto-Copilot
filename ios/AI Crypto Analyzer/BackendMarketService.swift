@@ -53,6 +53,15 @@ enum BackendMarketService {
         return dto.toTradingSignal()
     }
 
+    static func fetchCachedSignal(
+        symbol: String
+    ) async throws -> TradingSignal {
+        let dto: BackendSignalDTO = try await fetchJSON(
+            baseURL.appendingPathComponent("/api/cached-signal/\(symbol)")
+        )
+        return dto.toTradingSignal()
+    }
+
     static func fetchCandles(
         symbol: String,
         timeframe: Timeframe,

@@ -251,11 +251,8 @@ final class MarketViewModel: ObservableObject {
             async let fiveMinute = BackendMarketService.fetchCandles(symbol: symbol, timeframe: .fiveMinutes, limit: 300)
             async let fifteenMinute = BackendMarketService.fetchCandles(symbol: symbol, timeframe: .fifteenMinutes, limit: 200)
             async let chart = BackendMarketService.fetchCandles(symbol: symbol, timeframe: selectedChartTimeframe, limit: chartLimit(for: selectedChartTimeframe))
-            async let backendSignal = BackendMarketService.fetchSignal(
-                symbol: symbol,
-                investmentAmount: investmentAmount,
-                demoBalance: paperTrading.demoBalance,
-                feeAndSpreadPercent: feeAndSpreadPercent
+            async let backendSignal = BackendMarketService.fetchCachedSignal(
+                symbol: symbol
             )
 
             let new5m = try await fiveMinute
@@ -320,6 +317,17 @@ final class MarketViewModel: ObservableObject {
             updateActiveSignalCache()
             updateTradeQuoteCache()
             handleSignalChange()
+        }
+    }
+
+    private func refreshCachedBackendSignalOnly() async {
+        do {
+            let backendSignal = try await BackendMarketService.fetchCachedSignal(symbol: symbol)
+            signal = backendSignal
+            updateActiveSignalCache()
+            updateTradeQuoteCache()
+        } catch {
+            addRestLog("Cached signal refresh unavailable: \(error.localizedDescription)")
         }
     }
 
@@ -477,9 +485,9 @@ final class MarketViewModel: ObservableObject {
 
         updateLiveCandleArrays(price: update.price, quantity: 0, time: now)
 
-        if now.timeIntervalSince(lastSignalCalculationTime) > 15 {
+        if now.timeIntervalSince(lastSignalCalculationTime) > 30 {
             lastSignalCalculationTime = now
-            Task { await refreshOptionalMarketMicrostructure(shouldRecalculate: true, logRawResponse: false) }
+            Task { await refreshCachedBackendSignalOnly() }
         }
 
         lastUpdated = now

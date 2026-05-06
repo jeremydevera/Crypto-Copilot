@@ -56,15 +56,19 @@ export async function fetchCandles(symbol: string, timeframe: string, limit: num
       const data = await res.json() as any[][];
       if (Array.isArray(data) && data.length > 0) {
         console.log(`[Binance Futures] Fetched ${data.length} ${timeframe} candles for ${symbol}`);
-        return data.map((k: any[]) => ({
-          openTime: k[0],
-          open: parseFloat(k[1]),
-          high: parseFloat(k[2]),
-          low: parseFloat(k[3]),
-          close: parseFloat(k[4]),
-          volume: parseFloat(k[5]),
-          isClosed: true,
-        }));
+        return data.map((k: any[]) => {
+          const closeTime = Number(k[6]);
+          return {
+            openTime: Number(k[0]),
+            closeTime,
+            open: parseFloat(k[1]),
+            high: parseFloat(k[2]),
+            low: parseFloat(k[3]),
+            close: parseFloat(k[4]),
+            volume: parseFloat(k[5]),
+            isClosed: closeTime <= Date.now(),
+          };
+        });
       }
     } catch (err: any) {
       console.warn(`[Binance Futures] Error fetching ${symbol} ${timeframe}: ${err.message}`);
@@ -84,15 +88,19 @@ export async function fetchCandles(symbol: string, timeframe: string, limit: num
       const data = await res.json() as any[][];
       if (Array.isArray(data) && data.length > 0) {
         console.log(`[Binance US] Fetched ${data.length} ${timeframe} candles for ${symbol}`);
-        return data.map((k: any[]) => ({
-          openTime: k[0],
-          open: parseFloat(k[1]),
-          high: parseFloat(k[2]),
-          low: parseFloat(k[3]),
-          close: parseFloat(k[4]),
-          volume: parseFloat(k[5]),
-          isClosed: true,
-        }));
+        return data.map((k: any[]) => {
+          const closeTime = Number(k[6]);
+          return {
+            openTime: Number(k[0]),
+            closeTime,
+            open: parseFloat(k[1]),
+            high: parseFloat(k[2]),
+            low: parseFloat(k[3]),
+            close: parseFloat(k[4]),
+            volume: parseFloat(k[5]),
+            isClosed: closeTime <= Date.now(),
+          };
+        });
       }
     } catch (err: any) {
       console.warn(`[Binance US] Error fetching ${symbol} ${timeframe}: ${err.message}`);
@@ -112,15 +120,19 @@ export async function fetchCandles(symbol: string, timeframe: string, limit: num
       const data = await res.json() as any[][];
       if (Array.isArray(data) && data.length > 0) {
         console.log(`[Binance Spot] Fetched ${data.length} ${timeframe} candles for ${symbol}`);
-        return data.map((k: any[]) => ({
-          openTime: k[0],
-          open: parseFloat(k[1]),
-          high: parseFloat(k[2]),
-          low: parseFloat(k[3]),
-          close: parseFloat(k[4]),
-          volume: parseFloat(k[5]),
-          isClosed: true,
-        }));
+        return data.map((k: any[]) => {
+          const closeTime = Number(k[6]);
+          return {
+            openTime: Number(k[0]),
+            closeTime,
+            open: parseFloat(k[1]),
+            high: parseFloat(k[2]),
+            low: parseFloat(k[3]),
+            close: parseFloat(k[4]),
+            volume: parseFloat(k[5]),
+            isClosed: closeTime <= Date.now(),
+          };
+        });
       }
     } catch (err: any) {
       console.warn(`[Binance Spot] Error fetching ${symbol} ${timeframe}: ${err.message}`);
