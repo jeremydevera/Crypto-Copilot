@@ -99,6 +99,11 @@ export default function HomeTab({ vm }: HomeTabProps) {
                 <div className={`w-2 h-2 rounded-full ${freshnessDot(vm.dataFreshness)}`} />
                 <span className="text-xs text-gray-500">{freshnessLabel(vm.dataFreshness)}</span>
               </div>
+              {vm.lastUpdated && (
+                <p className="text-[10px] text-gray-600 mt-0.5">
+                  Last signal update: {new Date(vm.lastUpdated).toLocaleTimeString()}
+                </p>
+              )}
             </div>
           </div>
 

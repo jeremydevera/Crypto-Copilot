@@ -563,7 +563,7 @@ struct ContentView: View {
             }
 
             if let lastUpdated = viewModel.lastUpdated {
-                Text("Updated \(lastUpdated.formatted(date: .omitted, time: .standard))")
+                Text("Last signal update: \(lastUpdated.formatted(date: .omitted, time: .standard))")
                     .font(.caption2)
                     .foregroundStyle(themeComment)
             }
