@@ -2,12 +2,36 @@ import type { BookTicker, Candle, MarketMicrostructure, OrderBookSnapshot, Tradi
 
 const API_BASE_URL = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:3001';
 
-async function fetchJson<T>(path: string): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`);
-  if (!response.ok) {
-    throw new Error(`Backend request failed: ${response.status} ${response.statusText}`);
+const FETCH_TIMEOUT_MS = 45_000; // 45s — Render free tier cold start can take 30-60s
+
+async function fetchJson<T>(path: string, retries: number = 1): Promise<T> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(`${API_BASE_URL}${path}`, { signal: controller.signal });
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      // Retry once on server errors (5xx) or if Render is waking up
+      if (retries > 0 && (response.status >= 500 || response.status === 429)) {
+        console.warn(`[Backend] ${response.status} on ${path}, retrying in 5s...`);
+        await new Promise(r => setTimeout(r, 5000));
+        return fetchJson<T>(path, retries - 1);
+      }
+      throw new Error(`Backend request failed: ${response.status} ${response.statusText}`);
+    }
+    return response.json() as Promise<T>;
+  } catch (err: any) {
+    clearTimeout(timeout);
+    // Retry once on network errors (Render cold start can cause this)
+    if (retries > 0 && (err.name === 'AbortError' || err.name === 'TypeError')) {
+      console.warn(`[Backend] Network error on ${path} (${err.message}), retrying in 5s...`);
+      await new Promise(r => setTimeout(r, 5000));
+      return fetchJson<T>(path, retries - 1);
+    }
+    throw err;
   }
-  return response.json() as Promise<T>;
 }
 
 export async function fetchBackendSignal(
