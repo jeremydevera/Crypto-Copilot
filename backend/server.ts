@@ -16,6 +16,8 @@ import {
   refreshCandlesForInterval,
 } from './services/Cache.js';
 import { connectSymbol, startAutoConnect, getLivePrice, subscribeKline, subscribePrice } from './services/BinanceWebSocket.js';
+import { processAutoTrades } from './services/AutoTradeService.js';
+import { supabaseAdmin } from './lib/supabase.js';
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3001;
@@ -236,6 +238,86 @@ app.get('/api/exchange-rates', async (_req: Request, res: Response) => {
   }
 });
 
+// ── Auto-Trade API ────────────────────────────────────────────
+
+app.post('/api/users/:userId/auto-trade', async (req: Request, res: Response) => {
+  const userId = String(req.params.userId);
+  const enabled = Boolean(req.body.enabled);
+  const symbol = String(req.body.symbol ?? 'BTCUSDT').toUpperCase();
+  const investmentAmount = Number(req.body.investmentAmount ?? 10000);
+  const riskPercent = Number(req.body.riskPercent ?? 1);
+
+  try {
+    const { error } = await supabaseAdmin
+      .from('user_configs')
+      .upsert({
+        user_id: userId,
+        auto_trade_enabled: enabled,
+        symbol,
+        investment_amount: investmentAmount,
+        risk_percent: riskPercent,
+        updated_at: new Date().toISOString(),
+      }, {
+        onConflict: 'user_id,symbol',
+      });
+
+    if (error) {
+      throw error;
+    }
+
+    res.json({
+      ok: true,
+      userId,
+      symbol,
+      autoTradeEnabled: enabled,
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      error: 'Failed to update auto-trade setting',
+      details: error.message,
+    });
+  }
+});
+
+app.get('/api/users/:userId/auto-trade-stats', async (req: Request, res: Response) => {
+  const userId = String(req.params.userId);
+
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('trade_history')
+      .select('profit_loss, profit_loss_percent, source')
+      .eq('user_id', userId);
+
+    if (error) {
+      throw error;
+    }
+
+    const trades = data ?? [];
+    const totalTrades = trades.length;
+    const winningTrades = trades.filter(t => Number(t.profit_loss) > 0).length;
+    const losingTrades = trades.filter(t => Number(t.profit_loss) <= 0).length;
+    const totalProfit = trades.reduce((sum, t) => sum + Number(t.profit_loss ?? 0), 0);
+    const avgProfitPercent = totalTrades > 0
+      ? trades.reduce((sum, t) => sum + Number(t.profit_loss_percent ?? 0), 0) / totalTrades
+      : 0;
+    const winRate = totalTrades > 0 ? (winningTrades / totalTrades) * 100 : 0;
+
+    res.json({
+      totalTrades,
+      winningTrades,
+      losingTrades,
+      winRate: Math.round(winRate * 10) / 10,
+      totalProfit: Math.round(totalProfit * 100) / 100,
+      avgProfitPercent: Math.round(avgProfitPercent * 100) / 100,
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      error: 'Failed to fetch auto-trade stats',
+      details: error.message,
+    });
+  }
+});
+
 // ── Start Server (HTTP + WebSocket) ──────────────────────────
 
 const server = http.createServer(app);
@@ -364,10 +446,11 @@ const POPULAR_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT'];
 setInterval(async () => {
   for (const symbol of POPULAR_SYMBOLS) {
     try {
-      await fullRefresh(symbol);
-      console.log(`✓ Refreshed ${symbol} at ${new Date().toISOString()}`);
+      const signal = await fullRefresh(symbol);
+      await processAutoTrades(symbol, signal);
+      console.log(`✓ Refreshed + processed paper auto-trades for ${symbol} at ${new Date().toISOString()}`);
     } catch (error: any) {
-      console.error(`✗ Failed to refresh ${symbol}: ${error.message}`);
+      console.error(`✗ Failed to refresh/process ${symbol}: ${error.message}`);
     }
   }
 }, 30_000);
@@ -376,8 +459,9 @@ setInterval(async () => {
 (async () => {
   for (const symbol of POPULAR_SYMBOLS) {
     try {
-      await fullRefresh(symbol);
-      console.log(`✓ Initial refresh: ${symbol}`);
+      const signal = await fullRefresh(symbol);
+      await processAutoTrades(symbol, signal);
+      console.log(`✓ Initial refresh + paper auto-trade check: ${symbol}`);
     } catch (error: any) {
       console.error(`✗ Initial refresh failed for ${symbol}: ${error.message}`);
     }

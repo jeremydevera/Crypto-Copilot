@@ -86,7 +86,7 @@ export default function SettingsTab({ vm }: SettingsTabProps) {
               <p className="text-xs text-gray-500 mt-0.5">Automatically execute paper trades on signal changes</p>
             </div>
             <button
-              onClick={() => vm.setAutoTradeEnabled(!vm.autoTradeEnabled)}
+              onClick={() => vm.toggleAutoTrade(!vm.autoTradeEnabled)}
               className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${vm.autoTradeEnabled ? 'bg-green-600' : 'bg-gray-700'}`}
             >
               <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${vm.autoTradeEnabled ? 'translate-x-6' : 'translate-x-1'}`} />

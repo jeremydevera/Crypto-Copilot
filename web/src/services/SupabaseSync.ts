@@ -197,3 +197,38 @@ export async function saveUserConfigToSupabase(config: {
     .from('user_configs')
     .upsert({ user_id: user.id, ...updates }, { onConflict: 'user_id' })
 }
+
+// ---- Auto-Trade Config (Backend API) ----
+
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'https://trading-copilot-backend-1p9r.onrender.com';
+
+export async function setAutoTradeEnabled(enabled: boolean, symbol: string = 'BTCUSDT', investmentAmount: number = 10000, riskPercent: number = 1) {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return
+
+  const res = await fetch(`${BACKEND_URL}/api/users/${user.id}/auto-trade`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled, symbol, investmentAmount, riskPercent }),
+  })
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.details || err.error || 'Failed to update auto-trade setting')
+  }
+
+  return res.json()
+}
+
+export async function getAutoTradeStats() {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return null
+
+  const res = await fetch(`${BACKEND_URL}/api/users/${user.id}/auto-trade-stats`)
+
+  if (!res.ok) {
+    throw new Error('Failed to fetch auto-trade stats')
+  }
+
+  return res.json()
+}

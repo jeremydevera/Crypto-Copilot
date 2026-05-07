@@ -16,7 +16,7 @@ import { pairToSymbol } from '../data/socketFeeds';
 import type { SoundId } from '../engine/sounds';
 import { playSound } from '../engine/sounds';
 import { setExchangeRates as setFormattersExchangeRates, getExchangeRate } from '../engine/formatters';
-import { loadPaperTradesFromSupabase, loadUserConfigFromSupabase } from '../services/SupabaseSync';
+import { loadPaperTradesFromSupabase, loadUserConfigFromSupabase, setAutoTradeEnabled as setAutoTradeEnabledBackend } from '../services/SupabaseSync';
 import { supabase } from '../lib/supabase';
 
 const MAX_5M_CANDLES = 300;
@@ -856,6 +856,16 @@ export function useMarketViewModel() {
     }
   }, [addRestLog, feeAndSpreadPercent, fiatCurrency, investmentAmount, paperTrading.demoBalance, symbol, cryptoPair]);
 
+  // ── Auto-Trade Toggle (local + backend) ──────────────────────
+  const toggleAutoTrade = useCallback(async (enabled: boolean) => {
+    setAutoTradeEnabled(enabled);
+    try {
+      await setAutoTradeEnabledBackend(enabled, pairToSymbol(cryptoPair), investmentAmount, feeAndSpreadPercent);
+    } catch (e: any) {
+      addRestLog(`Auto-trade backend sync failed: ${e.message}`);
+    }
+  }, [cryptoPair, investmentAmount, feeAndSpreadPercent, addRestLog]);
+
   return {
     // State
     fiveMinuteCandles, fifteenMinuteCandles, selectedChartCandles,
@@ -871,7 +881,7 @@ export function useMarketViewModel() {
 
     // Actions
     setSelectedChartTimeframe, setInvestmentAmount,
-    setAutoTradeEnabled, setCryptoPair, setFiatCurrency,
+    toggleAutoTrade, setCryptoPair, setFiatCurrency,
     setBuySound, setSellSound,
     updateSelectedChartPrice,
     applyLiveFeed, connectLiveFeed, disconnectLiveFeed,
